@@ -113,10 +113,9 @@ class LaserAblationApp(tk.Tk):
         canvas = tk.Canvas(control_frame, width=340)
         scrollbar = ttk.Scrollbar(control_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
-
         scrollable_frame.bind(
-        "<" + "Configure" + ">",
-        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            "<" + "Configure" + ">",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
