@@ -3,15 +3,14 @@ name: Build macOS App
 on:
   push:
     tags:
-      - 'v*' # 當你推送版號標籤（例如 v1.0.0）時觸發自動打包
-  workflow_dispatch: # 允許你在 GitHub 網頁上手動點擊按鈕觸發打包
+      - 'v*'
 
 jobs:
   build-macos:
     runs-on: macos-latest
 
     steps:
-    - name: Checkout repository
+    - name: Checkout Repository
       uses: actions/checkout@v4
 
     - name: Set up Python
@@ -22,21 +21,20 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install numpy matplotlib numba pyinstaller
+        pip install -r requirements.txt
 
-    - name: Build .app with PyInstaller
+    - name: Build macOS Application with PyInstaller
       run: |
-        pyinstaller --noconfirm --onedir --windowed --name "LaserAblationSim" app.py
+        pyinstaller --noconfirm --onedir --windowed --name "LaserAblationSimulator" app.py
 
-    - name: Create ZIP archive
+    - name: Zip Executable Output
       run: |
         cd dist
-        ditto -c -k --sequesterRsrc LaserAblationSim.app ../LaserAblationSim-macOS.zip
-        
+        zip -r LaserAblationSimulator-macOS.zip LaserAblationSimulator.app
+
     - name: Upload Release Asset
-      uses: softprops/action-gh-release@v2
-      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
       with:
-        files: LaserAblationSim-macOS.zip
+        files: dist/LaserAblationSimulator-macOS.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
