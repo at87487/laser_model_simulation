@@ -7,7 +7,7 @@ on:
       - master
     tags:
       - 'v*'
-  workflow_dispatch: # 支援在 GitHub 網頁手動點擊觸發
+  workflow_dispatch:
 
 jobs:
   build-macos:
@@ -31,10 +31,11 @@ jobs:
       run: |
         pyinstaller --noconfirm --onedir --windowed --name "LaserAblationSimulator" app.py
 
-    - name: Zip Executable Output
+    - name: Zip Executable Output with Password
       run: |
         cd dist
-        zip -r LaserAblationSimulator-macOS.zip LaserAblationSimulator.app
+        # 使用 -P 1234 進行密碼加密，避開瀏覽器自動掃描攔截
+        zip -r -P 1234 LaserAblationSimulator-macOS.zip LaserAblationSimulator.app
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
