@@ -2,8 +2,12 @@ name: Build macOS App
 
 on:
   push:
+    branches:
+      - main
+      - master
     tags:
       - 'v*'
+  workflow_dispatch: # 支援在 GitHub 網頁手動點擊觸發
 
 jobs:
   build-macos:
@@ -32,9 +36,8 @@ jobs:
         cd dist
         zip -r LaserAblationSimulator-macOS.zip LaserAblationSimulator.app
 
-    - name: Upload Release Asset
-      uses: softprops/action-gh-release@v1
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
       with:
-        files: dist/LaserAblationSimulator-macOS.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: LaserAblationSimulator-macOS
+        path: dist/LaserAblationSimulator-macOS.zip
