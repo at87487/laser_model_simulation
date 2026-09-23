@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import numpy as np
 import matplotlib
-matplotlib.use("TkAgg")  # 指定 TkAgg 後端
+matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from numba import njit, prange
@@ -109,9 +109,10 @@ class LaserAblationApp(tk.Tk):
         scrollbar = ttk.Scrollbar(control_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
-        # 已修正：綁定事件補上 ""
+        # 此處改用字串拼接寫法，確保事件能正常綁定且避開字元解析問題
+        event_name = "<" + "Configure" + ">"
         scrollable_frame.bind(
-            "",
+            event_name,
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
@@ -157,7 +158,6 @@ class LaserAblationApp(tk.Tk):
         self.add_slider(lf_view, 'slice_x_um', 'X切面位置(μm)', -20.0, 20.0, 0.1, DEFAULTS['slice_x_um'], command=self.on_render_only)
         self.add_slider(lf_view, 'slice_y_um', 'Y切面位置(μm)', -20.0, 20.0, 0.1, DEFAULTS['slice_y_um'], command=self.on_render_only)
         
-        # Zoom Range
         self.add_slider(lf_view, 'zoom_x_min', 'Zoom X Min(μm)', -100.0, 100.0, 0.5, -20.0, command=self.on_render_only)
         self.add_slider(lf_view, 'zoom_x_max', 'Zoom X Max(μm)', -100.0, 100.0, 0.5, 20.0, command=self.on_render_only)
         self.add_slider(lf_view, 'zoom_y_min', 'Zoom Y Min(μm)', -50.0, 50.0, 0.5, -10.0, command=self.on_render_only)
@@ -170,14 +170,12 @@ class LaserAblationApp(tk.Tk):
         chk_spots = ttk.Checkbutton(lf_view, text="顯示軌跡與脈衝點", variable=self.var_show_spots, command=self.on_render_only)
         chk_spots.pack(anchor=tk.W, pady=2)
 
-        # 按鈕與狀態顯示
         btn_run = ttk.Button(scrollable_frame, text="🚀 開始模擬", command=self.run_simulation)
         btn_run.pack(fill=tk.X, pady=10)
 
         self.lbl_status = ttk.Label(scrollable_frame, text="狀態：請點擊「開始模擬」", wraplength=280)
         self.lbl_status.pack(fill=tk.X, pady=5)
 
-        # 右側繪圖區域
         plot_frame = ttk.Frame(self)
         plot_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
@@ -287,7 +285,6 @@ class LaserAblationApp(tk.Tk):
             x_grid_um = np.ascontiguousarray(np.linspace(x_min, x_max, res))
             y_grid_um = np.ascontiguousarray(np.linspace(y_min, y_max, res))
 
-            # 自動更新切面與 Zoom Range 控制項範圍
             self.set_slider_range('slice_x_um', float(x_min), float(x_max), float((x_min + x_max) / 2.0))
             self.set_slider_range('slice_y_um', float(y_min), float(y_max), 0.0 if (y_min <= 0 <= y_max) else float((y_min + y_max) / 2.0))
 
@@ -362,13 +359,11 @@ class LaserAblationApp(tk.Tk):
         ax5 = self.fig.add_subplot(2, 3, 5) 
         ax6 = self.fig.add_subplot(2, 3, 6)
 
-        # 1. 3D Surface
         ax1.plot_surface(X, Y, -Total_Depth_um, cmap='viridis', edgecolor='none', alpha=0.95)
         ax1.view_init(elev=self.get_val('elev'), azim=self.get_val('azim'))
         ax1.set_title(f"3D Surface (Max Depth: {np.max(Total_Depth_um):.3f} μm)", fontsize=8)
         ax1.set_xlabel("X (μm)", fontsize=7); ax1.set_ylabel("Y (μm)", fontsize=7); ax1.set_zlabel("Depth (μm)", fontsize=7)
 
-        # 2. 2D Top-View (含 Zoom-In)
         c = ax2.contourf(X, Y, Total_Depth_um, levels=50, cmap='inferno')
         if self.var_show_spots.get():
             colors = ['cyan', 'magenta', 'lime', 'yellow', 'white']
@@ -386,7 +381,6 @@ class LaserAblationApp(tk.Tk):
         ax2.axhline(y_grid_um[idx_y], color='red', linestyle='--', linewidth=1.2, alpha=0.7)
         ax2.axvline(x_grid_um[idx_x], color='cyan', linestyle='--', linewidth=1.2, alpha=0.7)
 
-        # 套用 Zoom Range
         zx_min, zx_max = min(self.get_val('zoom_x_min'), self.get_val('zoom_x_max')), max(self.get_val('zoom_x_min'), self.get_val('zoom_x_max'))
         zy_min, zy_max = min(self.get_val('zoom_y_min'), self.get_val('zoom_y_max')), max(self.get_val('zoom_y_min'), self.get_val('zoom_y_max'))
         
@@ -401,7 +395,6 @@ class LaserAblationApp(tk.Tk):
         ax2.set_xlabel("X (μm)", fontsize=7); ax2.set_ylabel("Y (μm)", fontsize=7)
         self.fig.colorbar(c, ax=ax2, label='Depth (μm)')
 
-        # 3. X Profile
         x_prof = Total_Depth_um[idx_y, :]
         ax3.plot(x_grid_um, x_prof, 'r-', linewidth=1.5)
         ax3.set_title(f"X-Profile (at Y = {y_grid_um[idx_y]:.2f} μm)", fontsize=8)
@@ -409,7 +402,6 @@ class LaserAblationApp(tk.Tk):
         ax3.grid(True, linestyle=':', alpha=0.6)
         ax3.invert_yaxis()
 
-        # 4. Y Profile (單一縱切面)
         y_prof = Total_Depth_um[:, idx_x]
         ax4.plot(y_grid_um, y_prof, 'c-', linewidth=1.5)
         ax4.set_title(f"Y-Profile (at X = {x_grid_um[idx_x]:.2f} μm)", fontsize=8)
@@ -417,7 +409,6 @@ class LaserAblationApp(tk.Tk):
         ax4.grid(True, linestyle=':', alpha=0.6)
         ax4.invert_yaxis()
 
-        # 5. Y 軸位置對應的「X 軸平均深度」
         mean_depth_y = np.mean(Total_Depth_um, axis=1)
         ax5.plot(y_grid_um, mean_depth_y, 'g-', linewidth=1.8, label='Mean Depth')
         ax5.axvline(y_grid_um[idx_y], color='red', linestyle='--', alpha=0.5, label='Current Y Slice')
@@ -427,7 +418,6 @@ class LaserAblationApp(tk.Tk):
         ax5.invert_yaxis()
         ax5.legend(fontsize=7)
 
-        # 6. Non-linear Depth Growth
         pass_depths = SIM_CACHE['pass_depth_history']
         p_range = np.arange(1, len(pass_depths) + 1, dtype=int)
         p_depths_arr = np.array(pass_depths, dtype=float)
