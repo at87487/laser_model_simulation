@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from numba import njit, prange
 
-# --- 1. 預設參數 ---
+# --- 1. 預設參數與快取設置 ---
 DEFAULTS = {
     'v_stage': -1.0,       # mm/s
     'v_scan': 10.0,        # mm/s
@@ -50,7 +50,7 @@ SIM_CACHE = {
     'f_laser': 0, 'F0_z': 0, 'E_p': 0
 }
 
-# --- Numba 燒蝕核心 ---
+# --- 2. Numba 高性能燒蝕核心演算法 ---
 @njit(parallel=True, fastmath=True)
 def compute_single_pass_ablation(x_grid_um, y_grid_um, x_spots_um, y_spots_um, current_depth, F0, effective_F_th, delta_um, w_spot_um, zR_um, D_sat=12.0):
     nx = len(x_grid_um)
@@ -91,6 +91,7 @@ def compute_single_pass_ablation(x_grid_um, y_grid_um, x_spots_um, y_spots_um, c
     return updated_depth
 
 
+# --- 3. GUI 主介面類別 ---
 class LaserAblationApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -101,7 +102,7 @@ class LaserAblationApp(tk.Tk):
         self.setup_ui()
 
     def setup_ui(self):
-        # 左側參數面板
+        # 左側控制面板與滾動機制
         control_frame = ttk.Frame(self, padding="10")
         control_frame.pack(side=tk.LEFT, fill=tk.Y)
 
@@ -109,7 +110,7 @@ class LaserAblationApp(tk.Tk):
         scrollbar = ttk.Scrollbar(control_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
-        # 此處改用字串拼接寫法，確保事件能正常綁定且避開字元解析問題
+        # 針對字串解析相容性進行保護處理
         event_name = "<" + "Configure" + ">"
         scrollable_frame.bind(
             event_name,
@@ -121,7 +122,7 @@ class LaserAblationApp(tk.Tk):
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # 1. 基礎運動參數
+        # 1. 基礎運動參數面板
         lf_base = ttk.LabelFrame(scrollable_frame, text="基礎運動與加工參數", padding="5")
         lf_base.pack(fill=tk.X, pady=5)
         self.add_slider(lf_base, 'v_stage', 'v_stage(mm/s)', -10.0, 10.0, 0.5, DEFAULTS['v_stage'])
@@ -134,7 +135,7 @@ class LaserAblationApp(tk.Tk):
         self.add_slider(lf_base, 'b_um', 'Minor b (μm)', 1.0, 100.0, 1.0, DEFAULTS['b_um'])
         self.add_slider(lf_base, 'phase_shift_deg', 'Pass 相位差 (°)', 0.0, 360.0, 15.0, DEFAULTS['phase_shift_deg'])
 
-        # 2. 光學參數
+        # 2. 光學參數面板
         lf_optics = ttk.LabelFrame(scrollable_frame, text="🔍 光學與離焦", padding="5")
         lf_optics.pack(fill=tk.X, pady=5)
         self.add_slider(lf_optics, 'wavelength_nm', '波長 λ (nm)', 257.5, 1070.0, 0.5, DEFAULTS['wavelength_nm'])
@@ -143,7 +144,7 @@ class LaserAblationApp(tk.Tk):
         self.add_slider(lf_optics, 'focal_length_mm', '透鏡焦距 f(mm)', 1.0, 200.0, 1.0, DEFAULTS['focal_length_mm'])
         self.add_slider(lf_optics, 'defocus_um', '離焦量 Δz(μm)', -100.0, 100.0, 1.0, DEFAULTS['defocus_um'])
 
-        # 3. 物理參數
+        # 3. 物理與功率面板
         lf_physics = ttk.LabelFrame(scrollable_frame, text="⚡ 雷射功率與孵化", padding="5")
         lf_physics.pack(fill=tk.X, pady=5)
         self.add_slider(lf_physics, 'P_avg_W', 'Power (W)', 0.01, 10.0, 0.05, DEFAULTS['P_avg_W'])
@@ -151,7 +152,7 @@ class LaserAblationApp(tk.Tk):
         self.add_slider(lf_physics, 'S_inc', '孵化係數 S', 0.5, 1.0, 0.02, DEFAULTS['S_inc'])
         self.add_slider(lf_physics, 'delta_um', 'delta (μm)', 0.001, 0.1, 0.001, DEFAULTS['delta_um'])
 
-        # 4. 視角與 Zoom 控制
+        # 4. 視角與 Zoom 範圍面板
         lf_view = ttk.LabelFrame(scrollable_frame, text="🔪 切面與 Zoom 視圍控制", padding="5")
         lf_view.pack(fill=tk.X, pady=5)
         self.add_slider(lf_view, 'grid_res', '網格解析度', 100, 300, 25, DEFAULTS['grid_res'], is_int=True)
@@ -176,6 +177,7 @@ class LaserAblationApp(tk.Tk):
         self.lbl_status = ttk.Label(scrollable_frame, text="狀態：請點擊「開始模擬」", wraplength=280)
         self.lbl_status.pack(fill=tk.X, pady=5)
 
+        # 右側 Matplotlib 繪圖區域
         plot_frame = ttk.Frame(self)
         plot_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
