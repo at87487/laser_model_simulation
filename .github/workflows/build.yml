@@ -18,28 +18,30 @@ jobs:
       uses: actions/checkout@v5
 
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
-
-    - name: Auto Fix Tkinter Binding Issue
-      run: |
-        # 自動搜尋 app.py 中錯誤的 bind("", 並將其替換為 bind("",
-        sed -i '' 's/bind("",/bind("",/g' app.py || true
-        sed -i '' "s/bind('',/bind('',/g" app.py || true
 
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install pyinstaller
 
     - name: Build macOS Application with PyInstaller
       run: |
-        pyinstaller --noconfirm --onedir --windowed \
-          --hidden-import=PIL._tkinter_finder \
-          --hidden-import=numba \
+        # 暫時拿掉 --windowed，讓終端機能印出錯誤，並加入完整隱藏模組
+        pyinstaller --noconfirm --onedir \
+          --hidden-import=numpy \
+          --hidden-import=matplotlib \
           --hidden-import=matplotlib.backends.backend_tkagg \
+          --hidden-import=numba \
           --name "LaserAblationSimulator" app.py
+
+    - name: Verify Build Output
+      run: |
+        ls -la dist/
+        ls -la dist/LaserAblationSimulator.app/Contents/MacOS/
 
     - name: Zip Executable Output with Password
       run: |
@@ -47,7 +49,7 @@ jobs:
         zip -r -P 1234 LaserAblationSimulator-macOS.zip LaserAblationSimulator.app
 
     - name: Upload Artifact
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v4
       with:
         name: LaserAblationSimulator-macOS
         path: dist/LaserAblationSimulator-macOS.zip
