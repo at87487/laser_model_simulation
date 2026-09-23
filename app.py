@@ -16,8 +16,8 @@ DEFAULTS = {
     'divider': 10,         # 實際發射頻率 1 kHz
     'num_cycles': 20,      
     'passes': 1,           
-    'a_um': 4.0,          # μm
-    'b_um': 8.0,          # μm
+    'a_um': 4.0,           # μm
+    'b_um': 8.0,           # μm
     'phase_shift_deg': 180.0, # Pass 間相位錯位角度 (度)
 
     'wavelength_nm': 257.5,
@@ -31,6 +31,12 @@ DEFAULTS = {
     'F_th_1': 0.3,         
     'S_inc': 0.6,          
     'delta_um': 0.04,      
+
+    # --- 自洽場與物理吸收新參數 ---
+    'n_real': 1.5,         # 折射率實部 n
+    'k_ext': 2.0,          # 消光係數 k
+    'alpha_plasma': 0.05,  # 電漿遮蔽衰減係數 (/μm)
+    'scf_tol': 1e-4,       # 自洽收斂容忍度
 
     'grid_res': 200,
     'elev': 30,
@@ -50,52 +56,109 @@ SIM_CACHE = {
     'f_laser': 0, 'F0_z': 0, 'E_p': 0
 }
 
-# --- 2. Numba 高性能燒蝕核心演算法 ---
+# --- 2. Numba 輔助物理函數 ---
+@njit(fastmath=True)
+def calculate_fresnel_reflectance(theta_inc, n_real, k_ext):
+    """ 計算非極化 (Unpolarized) 光雷射在斜入射下的菲涅耳反射率 """
+    cos_i = np.cos(theta_inc)
+    sin_i = np.sin(theta_inc)
+    
+    # 簡化複數折射率近似計算
+    n_sq = n_real**2 + k_ext**2
+    a = np.sqrt(0.5 * (np.sqrt((n_sq - sin_i**2)**2 + 4*n_real**2*k_ext**2) + (n_sq - sin_i**2)))
+    b = np.sqrt(0.5 * (np.sqrt((n_sq - sin_i**2)**2 + 4*n_real**2*k_ext**2) - (n_sq - sin_i**2)))
+    
+    Rs = ((cos_i - a)**2 + b**2) / ((cos_i + a)**2 + b**2)
+    Rp = Rs * ((a - sin_i*np.tan(theta_inc))**2 + b**2) / ((a + sin_i*np.tan(theta_inc))**2 + b**2)
+    
+    return 0.5 * (Rs + Rp)
+
+# --- 3. Numba 自洽場 (Self-Consistent Field) 燒蝕核心演算法 ---
 @njit(parallel=True, fastmath=True)
-def compute_single_pass_ablation(x_grid_um, y_grid_um, x_spots_um, y_spots_um, current_depth, F0, effective_F_th, delta_um, w_spot_um, zR_um, D_sat=12.0):
+def compute_single_pass_ablation_scf(
+    x_grid_um, y_grid_um, x_spots_um, y_spots_um, current_depth, 
+    F0, effective_F_th, delta_um, w_spot_um, zR_um, 
+    n_real, k_ext, alpha_plasma, max_scf_iters=5, tol=1e-4
+):
     nx = len(x_grid_um)
     ny = len(y_grid_um)
     n_spots = len(x_spots_um)
+
+    dx = x_grid_um[1] - x_grid_um[0] if nx > 1 else 1.0
+    dy = y_grid_um[1] - y_grid_um[0] if ny > 1 else 1.0
 
     updated_depth = current_depth.copy()
     w_sq = w_spot_um * w_spot_um
     cutoff_r_sq = 3.5 * 3.5 * w_sq
 
-    for s in prange(n_spots):
+    # 針對每一個雷射脈衝進行處理
+    for s in range(n_spots):
         xs = x_spots_um[s]
         ys = y_spots_um[s]
 
-        for i in range(ny):
-            dy = y_grid_um[i] - ys
-            dy_sq = dy * dy
-            if dy_sq > cutoff_r_sq:
-                continue
+        # 1. 計算當前表面梯度 Normal Vector 與 Slope，實現自洽場耦合
+        # 使用 Parallel 處理單脈衝作用於網格上的幾何與能量自洽迭代
+        
+        # 暫存當前脈衝作用下的局部深度變化
+        pulse_depth = updated_depth.copy()
 
-            for j in range(nx):
-                dx = x_grid_um[j] - xs
-                r_sq = dx * dx + dy_sq
+        for it in range(max_scf_iters):
+            depth_before_iter = pulse_depth.copy()
 
-                if r_sq < cutoff_r_sq:
-                    current_d = updated_depth[i, j]
-                    
-                    w_deeper_sq = w_sq * (1.0 + (current_d / zR_um)**2)
-                    F0_deeper = F0 * (w_sq / w_deeper_sq)
+            for i in prange(ny):
+                dy_pos = y_grid_um[i] - ys
+                dy_sq = dy_pos * dy_pos
+                if dy_sq > cutoff_r_sq:
+                    continue
 
-                    att_factor = np.exp(-current_d / D_sat)
-                    fluence = F0_deeper * np.exp(-2.0 * r_sq / w_deeper_sq) * att_factor
+                for j in range(nx):
+                    dx_pos = x_grid_um[j] - xs
+                    r_sq = dx_pos * dx_pos + dy_sq
 
-                    if fluence > effective_F_th:
-                        d_k = delta_um * np.log(fluence / effective_F_th)
-                        updated_depth[i, j] += d_k
+                    if r_sq < cutoff_r_sq:
+                        cur_d = pulse_depth[i, j]
+
+                        # 幾何梯度計算 (法線向量與斜率)
+                        # 邊界使用單邊差分，內部使用中央差分
+                        dz_dx = (pulse_depth[i, j+1] - pulse_depth[i, j-1]) / (2.0 * dx) if (0 < j < nx-1) else 0.0
+                        dz_dy = (pulse_depth[i+1, j] - pulse_depth[i-1, j]) / (2.0 * dy) if (0 < i < ny-1) else 0.0
+
+                        # 入射角 theta_inc = cos^-1(1 / sqrt(1 + (dz/dx)^2 + (dz/dy)^2))
+                        tan_slope_sq = dz_dx**2 + dz_dy**2
+                        cos_theta = 1.0 / np.sqrt(1.0 + tan_slope_sq)
+                        theta_inc = np.arccos(cos_theta)
+
+                        # 反射率修正 (Fresnel)
+                        R_theta = calculate_fresnel_reflectance(theta_inc, n_real, k_ext)
+
+                        # 光學發散與離焦深度修正
+                        w_deeper_sq = w_sq * (1.0 + (cur_d / zR_um)**2)
+                        F0_deeper = F0 * (w_sq / w_deeper_sq)
+
+                        # 光流密度 (Fluence) 包含投影面積修正 (cos_theta) 與 吸收/電漿遮蔽衰減
+                        plasma_att = np.exp(-alpha_plasma * cur_d)
+                        local_fluence = F0_deeper * np.exp(-2.0 * r_sq / w_deeper_sq) * (1.0 - R_theta) * cos_theta * plasma_att
+
+                        # 熱熔/蒸發燒蝕計算
+                        if local_fluence > effective_F_th:
+                            d_k = delta_um * np.log(local_fluence / effective_F_th)
+                            pulse_depth[i, j] = updated_depth[i, j] + d_k
+
+            # 檢查自洽場迭代收斂狀態
+            diff = np.max(np.abs(pulse_depth - depth_before_iter))
+            if diff < tol:
+                break
+
+        updated_depth = pulse_depth
 
     return updated_depth
 
 
-# --- 3. GUI 主介面類別 ---
+# --- 4. GUI 主介面類別 ---
 class LaserAblationApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Laser Ablation Simulator - macOS App")
+        self.title("Laser Ablation Simulator (Self-Consistent Field Edition) - macOS App")
         self.geometry("1400x900")
 
         self.widgets_dict = {}
@@ -110,7 +173,6 @@ class LaserAblationApp(tk.Tk):
         scrollbar = ttk.Scrollbar(control_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
-        # 針對字串解析相容性進行保護處理
         event_name = "<" + "Configure" + ">"
         scrollable_frame.bind(
             event_name,
@@ -144,13 +206,18 @@ class LaserAblationApp(tk.Tk):
         self.add_slider(lf_optics, 'focal_length_mm', '透鏡焦距 f(mm)', 1.0, 200.0, 1.0, DEFAULTS['focal_length_mm'])
         self.add_slider(lf_optics, 'defocus_um', '離焦量 Δz(μm)', -100.0, 100.0, 1.0, DEFAULTS['defocus_um'])
 
-        # 3. 物理與功率面板
-        lf_physics = ttk.LabelFrame(scrollable_frame, text="⚡ 雷射功率與孵化", padding="5")
+        # 3. 物理與自洽場 (Self-Consistent Field) 面板
+        lf_physics = ttk.LabelFrame(scrollable_frame, text="⚡ 雷射功率與自洽場 (SCF)", padding="5")
         lf_physics.pack(fill=tk.X, pady=5)
         self.add_slider(lf_physics, 'P_avg_W', 'Power (W)', 0.01, 10.0, 0.05, DEFAULTS['P_avg_W'])
         self.add_slider(lf_physics, 'F_th_1', 'F_th_1(J/cm²)', 0.01, 5.0, 0.05, DEFAULTS['F_th_1'])
         self.add_slider(lf_physics, 'S_inc', '孵化係數 S', 0.5, 1.0, 0.02, DEFAULTS['S_inc'])
         self.add_slider(lf_physics, 'delta_um', 'delta (μm)', 0.001, 0.1, 0.001, DEFAULTS['delta_um'])
+        
+        # 新增自洽場光學/介質屬性
+        self.add_slider(lf_physics, 'n_real', '折射率實部 n', 0.1, 5.0, 0.1, DEFAULTS['n_real'])
+        self.add_slider(lf_physics, 'k_ext', '消光係數 k', 0.0, 5.0, 0.1, DEFAULTS['k_ext'])
+        self.add_slider(lf_physics, 'alpha_plasma', '電漿吸收 α (/μm)', 0.0, 0.5, 0.01, DEFAULTS['alpha_plasma'])
 
         # 4. 視角與 Zoom 範圍面板
         lf_view = ttk.LabelFrame(scrollable_frame, text="🔪 切面與 Zoom 視圍控制", padding="5")
@@ -171,7 +238,7 @@ class LaserAblationApp(tk.Tk):
         chk_spots = ttk.Checkbutton(lf_view, text="顯示軌跡與脈衝點", variable=self.var_show_spots, command=self.on_render_only)
         chk_spots.pack(anchor=tk.W, pady=2)
 
-        btn_run = ttk.Button(scrollable_frame, text="🚀 開始模擬", command=self.run_simulation)
+        btn_run = ttk.Button(scrollable_frame, text="🚀 開始模擬 (SCF模式)", command=self.run_simulation)
         btn_run.pack(fill=tk.X, pady=10)
 
         self.lbl_status = ttk.Label(scrollable_frame, text="狀態：請點擊「開始模擬」", wraplength=280)
@@ -222,7 +289,7 @@ class LaserAblationApp(tk.Tk):
         self.widgets_dict[key]['lbl'].config(text=f"{self.widgets_dict[key]['label_text']}: {v}")
 
     def run_simulation(self):
-        self.lbl_status.config(text="狀態：⚡ 正在計算多 Pass 模擬中...")
+        self.lbl_status.config(text="狀態：⚡ 正在執行自洽場 (SCF) 多 Pass 模擬中...")
         self.update_idletasks()
 
         try:
@@ -298,14 +365,22 @@ class LaserAblationApp(tk.Tk):
             current_depth = np.zeros((res, res), dtype=np.float64)
             pass_history = []
 
+            # 讀取自洽場介質光學參數
+            n_real = self.get_val('n_real')
+            k_ext = self.get_val('k_ext')
+            alpha_plasma = self.get_val('alpha_plasma')
+
             for p in range(total_passes):
                 effective_F_th = max(self.get_val('F_th_1') * ((p + 1) ** (self.get_val('S_inc') - 1.0)), self.get_val('F_th_1') * 0.3)
                 x_p, y_p = all_pass_spots[p]
 
-                current_depth = compute_single_pass_ablation(
+                # 調用升級後的 SCF 燒蝕演算法
+                current_depth = compute_single_pass_ablation_scf(
                     x_grid_um, y_grid_um, x_p, y_p, 
                     current_depth, F0_z, effective_F_th, 
-                    self.get_val('delta_um'), w_z_um, zR_um
+                    self.get_val('delta_um'), w_z_um, zR_um,
+                    n_real, k_ext, alpha_plasma,
+                    max_scf_iters=5, tol=DEFAULTS['scf_tol']
                 )
                 pass_history.append(float(np.max(current_depth)))
 
@@ -328,7 +403,7 @@ class LaserAblationApp(tk.Tk):
 
             self.render_plots()
 
-            status_msg = (f"狀態：✅ 模擬完成！\n"
+            status_msg = (f"狀態：✅ 自洽場模擬完成！\n"
                           f"Spot Size (d0): {d0_um:.3f} μm\n"
                           f"Pitch: {pitch_stage_um:.3f} μm\n"
                           f"Overlap: {overlap_rate:.1f}%")
