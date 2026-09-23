@@ -30,8 +30,8 @@ jobs:
 
     - name: Build macOS Application with PyInstaller
       run: |
-        # 暫時拿掉 --windowed，讓終端機能印出錯誤，並加入完整隱藏模組
-        pyinstaller --noconfirm --onedir \
+        # 加上 --windowed 確保打包成完整的 .app 套件
+        pyinstaller --noconfirm --onedir --windowed \
           --hidden-import=numpy \
           --hidden-import=matplotlib \
           --hidden-import=matplotlib.backends.backend_tkagg \
