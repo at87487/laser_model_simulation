@@ -109,7 +109,7 @@ class LaserAblationApp(tk.Tk):
         scrollbar = ttk.Scrollbar(control_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
-        # 修正：補上事件名稱 ""
+        # 修復：事件名稱必須為 ""
         scrollable_frame.bind(
             "",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
@@ -197,8 +197,10 @@ class LaserAblationApp(tk.Tk):
 
         var = tk.IntVar(value=int(default_val)) if is_int else tk.DoubleVar(value=float(default_val))
 
-        def update_lbl(val):
-            v = int(float(val)) if is_int else round(float(val), 3)
+        # 修復：滑塊觸發 command 時會傳遞數值，透過 *args 接收
+        def update_lbl(*args):
+            val = var.get()
+            v = int(val) if is_int else round(float(val), 3)
             lbl.config(text=f"{label_text}: {v}")
             if command:
                 command()
