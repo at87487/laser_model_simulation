@@ -29,7 +29,7 @@ DEFAULTS = {
 
     'P_avg_W': 0.25,       
     'F_th_1': 0.3,         
-    'S_inc': 0.6,         
+    'S_inc': 0.6,          
     'delta_um': 0.04,      
 
     'grid_res': 200,
@@ -109,6 +109,7 @@ class LaserAblationApp(tk.Tk):
         scrollbar = ttk.Scrollbar(control_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
+        # 修正：補上事件名稱 ""
         scrollable_frame.bind(
             "",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
