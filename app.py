@@ -52,7 +52,6 @@ SIM_CACHE = {
     'f_laser': 0, 'F0_z': 0, 'E_p': 0
 }
 
-# 物理修正版：包含深溝槽波導聚焦與焦區熱平滑效應
 @njit(parallel=True, fastmath=True)
 def compute_single_pass_ablation_experiment_matched(
     x_grid_um, y_grid_um, x_spots_um, y_spots_um, 
@@ -65,7 +64,6 @@ def compute_single_pass_ablation_experiment_matched(
 
     updated_depth = current_depth.copy()
     w_sq = w_spot_um * w_spot_um
-    
     effective_w_sq = w_sq * 2.8  
     cutoff_r_sq = 3.5 * 3.5 * effective_w_sq
     heat_accum_factor = 1.0 + 0.12 * (f_laser_khz ** 0.65)
@@ -105,7 +103,7 @@ class LaserApp:
     def __init__(self, root):
         self.root = root
         self.root.title("SiO2 飛秒雷射加工物理模擬與 SCF 擬合系統")
-        self.root.geometry("1450x950")
+        self.root.geometry("1550x950")
         
         self.is_destroyed = False
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -121,134 +119,149 @@ class LaserApp:
                 self.vars[key] = tk.DoubleVar(value=val)
 
         self.create_widgets()
-        
-        # 初始執行一次模擬與渲染
-        self.run_simulation()
-        self.render_plots()
+        self.render_empty_plots()
 
     def create_widgets(self):
-        # 左右分割：左側控制面板、右側 Matplotlib 畫布
         main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        control_frame = ttk.Frame(main_paned, width=420)
-        main_paned.add(control_frame, weight=1)
+        # 左側控制面板（固定寬度）
+        control_frame = ttk.Frame(main_paned, width=480)
+        main_paned.add(control_frame, weight=0)
 
+        # 右側繪圖區
         plot_frame = ttk.Frame(main_paned)
-        main_paned.add(plot_frame, weight=3)
+        main_paned.add(plot_frame, weight=1)
 
-        # 左側使用 Notebook (標籤分頁取代 Accordion)
         self.notebook = ttk.Notebook(control_frame)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # 分頁 1: 基礎運動學
         tab_base = ttk.Frame(self.notebook)
-        self.notebook.add(tab_base, text='運動學與加工')
+        self.notebook.add(tab_base, text=' 運動與加工 ')
         self.build_base_controls(tab_base)
 
-        # 分頁 2: 光學與離焦
         tab_optics = ttk.Frame(self.notebook)
-        self.notebook.add(tab_optics, text='光學與離焦')
+        self.notebook.add(tab_optics, text=' 光學與離焦 ')
         self.build_optics_controls(tab_optics)
 
-        # 分頁 3: 物理參數與熱效應
         tab_physics = ttk.Frame(self.notebook)
-        self.notebook.add(tab_physics, text='物理與熱累積')
+        self.notebook.add(tab_physics, text=' 物理與熱累積 ')
         self.build_physics_controls(tab_physics)
 
-        # 分頁 4: SCF 擬合
         tab_scf = ttk.Frame(self.notebook)
-        self.notebook.add(tab_scf, text='SCF 參數擬合')
+        self.notebook.add(tab_scf, text=' SCF 擬合 ')
         self.build_scf_controls(tab_scf)
 
-        # 分頁 5: 顯示與切面
         tab_slice = ttk.Frame(self.notebook)
-        self.notebook.add(tab_slice, text='視角與切面')
+        self.notebook.add(tab_slice, text=' 視角與切面 ')
         self.build_slice_controls(tab_slice)
 
-        # 底部按鈕與狀態列
+        # 底部操作按鈕
         bottom_frame = ttk.Frame(control_frame)
         bottom_frame.pack(fill=tk.X, padx=5, pady=10)
 
         self.btn_run = ttk.Button(bottom_frame, text="🚀 開始模擬", command=self.on_run_clicked)
         self.btn_run.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
-        self.status_var = tk.StringVar(value="狀態：就緒")
-        self.status_label = ttk.Label(control_frame, textvariable=self.status_var, wraplength=400, relief=tk.SUNKEN, anchor=tk.W)
+        self.status_var = tk.StringVar(value="狀態：就緒 (請點擊「開始模擬」)")
+        self.status_label = ttk.Label(control_frame, textvariable=self.status_var, wraplength=450, relief=tk.SUNKEN, anchor=tk.W)
         self.status_label.pack(fill=tk.X, padx=5, pady=5)
 
-        # 右側 Matplotlib 畫布設置
+        # Matplotlib 畫布
         self.fig = plt.figure(figsize=(10, 8), dpi=100)
         self.canvas = FigureCanvasTkAgg(self.fig, master=plot_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-    def add_slider(self, parent, label_text, var_key, min_v, max_v, step_v):
+    def add_control_row(self, parent, label_text, var_key, min_v, max_v, step_v, is_int=False):
+        """包含「標籤 + 雙向同步數值輸入框 + 滑桿」的控制元件"""
         frame = ttk.Frame(parent)
-        frame.pack(fill=tk.X, padx=5, pady=2)
+        frame.pack(fill=tk.X, padx=5, pady=3)
         
-        lbl = ttk.Label(frame, text=label_text, width=22, anchor=tk.W)
+        lbl = ttk.Label(frame, text=label_text, width=20, anchor=tk.W)
         lbl.pack(side=tk.LEFT)
+
+        var = self.vars[var_key]
         
-        val_lbl = ttk.Label(frame, textvariable=self.vars[var_key], width=8, anchor=tk.E)
-        val_lbl.pack(side=tk.RIGHT)
-        
-        scale = ttk.Scale(frame, from_=min_v, to=max_v, variable=self.vars[var_key], 
-                          command=lambda v: self.on_slider_changed())
+        # 數字輸入框 Entry
+        entry = ttk.Entry(frame, textvariable=var, width=8, justify=tk.RIGHT)
+        entry.pack(side=tk.RIGHT, padx=(5, 0))
+
+        # 滑桿 Scale
+        scale = ttk.Scale(frame, from_=min_v, to=max_v, variable=var)
         scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
 
     def build_base_controls(self, parent):
-        self.add_slider(parent, "v_stage (mm/s)", 'v_stage', -10.0, 10.0, 0.5)
-        self.add_slider(parent, "v_scan (mm/s)", 'v_scan', -100.0, 100.0, 1.0)
-        self.add_slider(parent, "Base Rep (kHz)", 'f_base_khz', 400, 1000, 100)
-        self.add_slider(parent, "Divider", 'divider', 1, 100, 1)
-        self.add_slider(parent, "Cycles/Pass", 'num_cycles', 1, 40, 1)
-        self.add_slider(parent, "Passes", 'passes', 1, 50, 1)
-        self.add_slider(parent, "Major a (μm)", 'a_um', 1.0, 100.0, 1.0)
-        self.add_slider(parent, "Minor b (μm)", 'b_um', 1.0, 100.0, 1.0)
-        self.add_slider(parent, "Pass 相位差 (°)", 'phase_shift_deg', 0.0, 360.0, 15.0)
+        self.add_control_row(parent, "v_stage (mm/s)", 'v_stage', -10.0, 10.0, 0.5)
+        self.add_control_row(parent, "v_scan (mm/s)", 'v_scan', -100.0, 100.0, 1.0)
+        self.add_control_row(parent, "Base Rep (kHz)", 'f_base_khz', 400, 1000, 100, is_int=True)
+        self.add_control_row(parent, "Divider", 'divider', 1, 100, 1, is_int=True)
+        self.add_control_row(parent, "Cycles/Pass", 'num_cycles', 1, 40, 1, is_int=True)
+        self.add_control_row(parent, "Passes", 'passes', 1, 50, 1, is_int=True)
+        self.add_control_row(parent, "Major a (μm)", 'a_um', 1.0, 100.0, 1.0)
+        self.add_control_row(parent, "Minor b (μm)", 'b_um', 1.0, 100.0, 1.0)
+        self.add_control_row(parent, "Pass 相位差 (°)", 'phase_shift_deg', 0.0, 360.0, 15.0)
 
     def build_optics_controls(self, parent):
-        self.add_slider(parent, "波長 λ (nm)", 'wavelength_nm', 257.5, 1070.0, 0.5)
-        self.add_slider(parent, "光束質量 M²", 'M2', 1.0, 3.0, 0.05)
-        self.add_slider(parent, "入射光徑 D(mm)", 'input_D_mm', 1.0, 20.0, 0.1)
-        self.add_slider(parent, "透鏡焦距 f(mm)", 'focal_length_mm', 1.0, 200.0, 1.0)
-        self.add_slider(parent, "離焦量 Δz(μm)", 'defocus_um', -100.0, 100.0, 1.0)
-        self.add_slider(parent, "脈寬 τ (fs)", 'pulse_width_fs', 50, 5000, 50)
+        self.add_control_row(parent, "波長 λ (nm)", 'wavelength_nm', 257.5, 1070.0, 0.5)
+        self.add_control_row(parent, "光束質量 M²", 'M2', 1.0, 3.0, 0.05)
+        self.add_control_row(parent, "入射光徑 D(mm)", 'input_D_mm', 1.0, 20.0, 0.1)
+        self.add_control_row(parent, "透鏡焦距 f(mm)", 'focal_length_mm', 1.0, 200.0, 1.0)
+        self.add_control_row(parent, "離焦量 Δz(μm)", 'defocus_um', -100.0, 100.0, 1.0)
+        self.add_control_row(parent, "脈寬 τ (fs)", 'pulse_width_fs', 50, 5000, 50, is_int=True)
 
     def build_physics_controls(self, parent):
-        self.add_slider(parent, "Power (W)", 'P_avg_W', 0.01, 10.0, 0.05)
-        self.add_slider(parent, "F_th_1 (J/cm²)", 'F_th_1', 0.5, 5.0, 0.1)
-        self.add_slider(parent, "孵化係數 S", 'S_inc', 0.70, 0.95, 0.01)
-        self.add_slider(parent, "delta (μm)", 'delta_um', 0.005, 0.150, 0.001)
-        self.add_slider(parent, "D_sat (μm)", 'D_sat', 1.0, 50.0, 0.5)
+        self.add_control_row(parent, "Power (W)", 'P_avg_W', 0.01, 10.0, 0.05)
+        self.add_control_row(parent, "F_th_1 (J/cm²)", 'F_th_1', 0.5, 5.0, 0.1)
+        self.add_control_row(parent, "孵化係數 S", 'S_inc', 0.70, 0.95, 0.01)
+        self.add_control_row(parent, "delta (μm)", 'delta_um', 0.005, 0.150, 0.001)
+        self.add_control_row(parent, "D_sat (μm)", 'D_sat', 1.0, 50.0, 0.5)
 
     def build_scf_controls(self, parent):
-        self.add_slider(parent, "實驗目標底部深度(μm)", 'exp_target_depth_um', 1.0, 100.0, 0.5)
-        self.add_slider(parent, "實際加工光斑(μm)", 'exp_target_spot_um', 0.2, 10.0, 0.1)
+        self.add_control_row(parent, "實驗目標深度(μm)", 'exp_target_depth_um', 1.0, 100.0, 0.5)
+        self.add_control_row(parent, "實際加工光斑(μm)", 'exp_target_spot_um', 0.2, 10.0, 0.1)
         
         btn_scf = ttk.Button(parent, text="🔄 執行物理約束 SCF 擬合", command=self.on_scf_clicked)
         btn_scf.pack(fill=tk.X, padx=10, pady=20)
 
     def build_slice_controls(self, parent):
-        self.add_slider(parent, "網格解析度", 'grid_res', 100, 300, 25)
-        self.add_slider(parent, "3D 俯角", 'elev', 0, 90, 5)
-        self.add_slider(parent, "3D 方位", 'azim', -180, 180, 5)
-        self.add_slider(parent, "X切面位置(μm)", 'slice_x_um', -20.0, 20.0, 0.1)
-        self.add_slider(parent, "Y切面位置(μm)", 'slice_y_um', -20.0, 20.0, 0.1)
+        self.add_control_row(parent, "網格解析度", 'grid_res', 100, 300, 25, is_int=True)
+        self.add_control_row(parent, "3D 俯角", 'elev', 0, 90, 5, is_int=True)
+        self.add_control_row(parent, "3D 方位", 'azim', -180, 180, 5, is_int=True)
+        self.add_control_row(parent, "X切面位置(μm)", 'slice_x_um', -20.0, 20.0, 0.1)
+        self.add_control_row(parent, "Y切面位置(μm)", 'slice_y_um', -20.0, 20.0, 0.1)
         
-        chk = ttk.Checkbutton(parent, text="顯示軌跡與脈衝點", variable=self.vars['show_spots'], command=self.on_slider_changed)
+        chk = ttk.Checkbutton(parent, text="顯示軌跡與脈衝點", variable=self.vars['show_spots'])
         chk.pack(anchor=tk.W, padx=10, pady=10)
 
-    def on_slider_changed(self):
-        # 為了順暢，數值滑動時可選擇是否即時更新（此處採用即時或可改為輕量渲染）
-        pass
+    def render_empty_plots(self):
+        self.fig.clear()
+        titles = ["3D Surface", "2D Top-View", "X-Profile", "Y-Profile", "Average Depth vs. Y", "Depth vs. Passes"]
+        for i, title in enumerate(titles, 1):
+            ax = self.fig.add_subplot(2, 3, i, projection='3d' if i==1 else None)
+            ax.set_title(title, fontsize=9)
+            ax.set_xlabel("X (μm)" if i!=5 else "Y (μm)")
+            ax.set_ylabel("Y (μm)" if i in [1, 2] else "Depth (μm)")
+            ax.grid(True, linestyle=':', alpha=0.5)
+        self.fig.tight_layout()
+        self.canvas.draw()
 
-    def run_simulation(self):
-        wavelength_m = self.vars['wavelength_nm'].get() * 1e-9
-        M2 = self.vars['M2'].get()
-        D_m = self.vars['input_D_mm'].get() * 1e-3
-        f_m = self.vars['focal_length_mm'].get() * 1e-3
-        defocus_m = self.vars['defocus_um'].get() * 1e-6
+    def get_params_dict(self):
+        """安全的從 GUI 取得數值"""
+        params = {}
+        for k, v in self.vars.items():
+            try:
+                params[k] = v.get()
+            except Exception:
+                params[k] = DEFAULTS[k]
+        return params
+
+    def run_simulation_logic(self, p):
+        """純物理計算邏輯，不存取 GUI 變數"""
+        wavelength_m = p['wavelength_nm'] * 1e-9
+        M2 = p['M2']
+        D_m = p['input_D_mm'] * 1e-3
+        f_m = p['focal_length_mm'] * 1e-3
+        defocus_m = p['defocus_um'] * 1e-6
 
         w0_m = (2.0 * wavelength_m * f_m * M2) / (np.pi * D_m)
         w0_um = w0_m * 1e6
@@ -259,45 +272,41 @@ class LaserApp:
         w_z_m = w0_m * np.sqrt(1.0 + (defocus_m / zR_m)**2)
         w_z_um = w_z_m * 1e6
 
-        f_laser = (self.vars['f_base_khz'].get() * 1000.0) / float(self.vars['divider'].get())
+        f_laser = (p['f_base_khz'] * 1000.0) / float(p['divider'])
         f_laser_khz = f_laser / 1000.0
-        E_p = self.vars['P_avg_W'].get() / f_laser
+        E_p = p['P_avg_W'] / f_laser
         w_z_cm = w_z_m * 100.0
         F0_z = (2.0 * E_p) / (np.pi * (w_z_cm**2))
 
-        F_th_1 = self.vars['F_th_1'].get()
-        if F0_z > F_th_1:
-            d_eff_um = 2.0 * w_z_um * np.sqrt(0.5 * np.log(F0_z / F_th_1))
-        else:
-            d_eff_um = 0.0
+        F_th_1 = p['F_th_1']
+        d_eff_um = 2.0 * w_z_um * np.sqrt(0.5 * np.log(F0_z / F_th_1)) if F0_z > F_th_1 else 0.0
 
-        v_stage_um_s = abs(self.vars['v_stage'].get()) * 1000.0
+        v_stage_um_s = abs(p['v_stage']) * 1000.0
         pitch_stage_um = v_stage_um_s / f_laser
         overlap_rate = (1.0 - (pitch_stage_um / d0_um)) * 100.0
 
-        a_um, b_um = self.vars['a_um'].get(), self.vars['b_um'].get()
+        a_um, b_um = p['a_um'], p['b_um']
         a_mm, b_mm = a_um / 1000.0, b_um / 1000.0
         h = ((a_mm - b_mm)**2) / ((a_mm + b_mm)**2 + 1e-12)
         ellipse_perimeter_mm = np.pi * (a_mm + b_mm) * (1 + (3 * h) / (10 + np.sqrt(4 - 3 * h)))
-        v_scan_val = self.vars['v_scan'].get()
+        v_scan_val = p['v_scan']
         f_scan = 1e-5 if abs(v_scan_val) < 1e-5 else v_scan_val / ellipse_perimeter_mm
 
         period = 1.0 / abs(f_scan)
-        total_time = self.vars['num_cycles'].get() * period
+        total_time = p['num_cycles'] * period
         dt = 1.0 / f_laser
         t = np.arange(0, total_time, dt)
         if len(t) > 30000: t = t[:30000]
 
-        total_passes = self.vars['passes'].get()
-        phase_shift_rad = np.radians(self.vars['phase_shift_deg'].get())
+        total_passes = int(p['passes'])
+        phase_shift_rad = np.radians(p['phase_shift_deg'])
 
         all_pass_spots = []
-        all_x_spots = []
-        all_y_spots = []
+        all_x_spots, all_y_spots = [], []
 
-        for p in range(total_passes):
-            current_phase = p * phase_shift_rad
-            x_p = np.ascontiguousarray(a_um * np.cos(2 * np.pi * f_scan * t + current_phase) + (self.vars['v_stage'].get() * 1000.0) * t)
+        for pass_i in range(total_passes):
+            current_phase = pass_i * phase_shift_rad
+            x_p = np.ascontiguousarray(a_um * np.cos(2 * np.pi * f_scan * t + current_phase) + (p['v_stage'] * 1000.0) * t)
             y_p = np.ascontiguousarray(b_um * np.sin(2 * np.pi * f_scan * t + current_phase))
 
             all_pass_spots.append((x_p, y_p))
@@ -308,22 +317,22 @@ class LaserApp:
         x_min, x_max = np.min(all_x_spots) - margin_um, np.max(all_x_spots) + margin_um
         y_min, y_max = np.min(all_y_spots) - margin_um, np.max(all_y_spots) + margin_um
 
-        res = self.vars['grid_res'].get()
+        res = int(p['grid_res'])
         x_grid_um = np.ascontiguousarray(np.linspace(x_min, x_max, res))
         y_grid_um = np.ascontiguousarray(np.linspace(y_min, y_max, res))
 
         current_depth = np.zeros((res, res), dtype=np.float64)
         pass_history = []
 
-        for p in range(total_passes):
-            effective_F_th = max(self.vars['F_th_1'].get() * ((p + 1) ** (self.vars['S_inc'].get() - 1.0)), self.vars['F_th_1'].get() * 0.35)
-            x_p, y_p = all_pass_spots[p]
+        for pass_i in range(total_passes):
+            effective_F_th = max(p['F_th_1'] * ((pass_i + 1) ** (p['S_inc'] - 1.0)), p['F_th_1'] * 0.35)
+            x_p, y_p = all_pass_spots[pass_i]
 
             current_depth = compute_single_pass_ablation_experiment_matched(
                 x_grid_um, y_grid_um, x_p, y_p,
                 current_depth, F0_z, effective_F_th,
-                self.vars['delta_um'].get(), w_z_um, zR_um,
-                D_sat=self.vars['D_sat'].get(), f_laser_khz=f_laser_khz
+                p['delta_um'], w_z_um, zR_um,
+                D_sat=p['D_sat'], f_laser_khz=f_laser_khz
             )
             pass_history.append(float(np.max(current_depth)))
 
@@ -357,6 +366,8 @@ class LaserApp:
         y_grid_um = np.atleast_1d(SIM_CACHE['y_grid_um']).flatten()
         all_pass_spots = SIM_CACHE['all_pass_spots']
 
+        p = self.get_params_dict()
+
         ax1 = self.fig.add_subplot(2, 3, 1, projection='3d')
         ax2 = self.fig.add_subplot(2, 3, 2)
         ax3 = self.fig.add_subplot(2, 3, 3)
@@ -366,7 +377,7 @@ class LaserApp:
 
         # 1. 3D Surface
         ax1.plot_surface(X, Y, -Total_Depth_um, cmap='viridis', edgecolor='none', alpha=0.95)
-        ax1.view_init(elev=self.vars['elev'].get(), azim=self.vars['azim'].get())
+        ax1.view_init(elev=int(p['elev']), azim=int(p['azim']))
 
         ny, nx = Total_Depth_um.shape
         center_region = Total_Depth_um[ny//4:3*ny//4, nx//4:3*nx//4]
@@ -377,7 +388,7 @@ class LaserApp:
 
         # 2. 2D Top-View
         c = ax2.contourf(X, Y, Total_Depth_um, levels=50, cmap='inferno')
-        if self.vars['show_spots'].get():
+        if p['show_spots']:
             colors = ['cyan', 'magenta', 'lime', 'yellow', 'white']
             for p_idx, (xs, ys) in enumerate(all_pass_spots):
                 xs_arr = np.atleast_1d(xs).flatten()
@@ -387,16 +398,16 @@ class LaserApp:
                     ax2.plot(xs_arr, ys_arr, color=col, linestyle='--', linewidth=0.8, alpha=0.7)
                     ax2.scatter(xs_arr, ys_arr, color='white', edgecolors='none', s=6, alpha=0.9)
 
-        idx_x = int(np.clip((np.abs(x_grid_um - self.vars['slice_x_um'].get())).argmin(), 0, len(x_grid_um) - 1))
-        idx_y = int(np.clip((np.abs(y_grid_um - self.vars['slice_y_um'].get())).argmin(), 0, len(y_grid_um) - 1))
+        idx_x = int(np.clip((np.abs(x_grid_um - p['slice_x_um'])).argmin(), 0, len(x_grid_um) - 1))
+        idx_y = int(np.clip((np.abs(y_grid_um - p['slice_y_um'])).argmin(), 0, len(y_grid_um) - 1))
 
         ax2.axhline(y_grid_um[idx_y], color='red', linestyle='--', linewidth=1.2, alpha=0.7)
         ax2.axvline(x_grid_um[idx_x], color='cyan', linestyle='--', linewidth=1.2, alpha=0.7)
 
         f_laser_khz = SIM_CACHE['f_laser'] / 1000.0
-        ax2.set_title(f"2D Top-View (Rep: {f_laser_khz:.1f} kHz | M²: {self.vars['M2'].get():.2f})", fontsize=9)
+        ax2.set_title(f"2D Top-View (Rep: {f_laser_khz:.1f} kHz | M²: {p['M2']:.2f})", fontsize=9)
         ax2.set_xlabel("X (μm)"); ax2.set_ylabel("Y (μm)")
-        self.fig.colorbar(c, ax=ax2, label='Depth')
+        self.fig.colorbar(c, ax=ax2, label='Depth (μm)')
 
         # 3. X Profile
         x_prof = Total_Depth_um[idx_y, :]
@@ -435,16 +446,16 @@ class LaserApp:
     def on_run_clicked(self):
         self.btn_run.config(state=tk.DISABLED)
         self.status_var.set("狀態：⚡ 正在計算物理修正版 SiO2 模擬...")
-        self.root.update_idletasks()
+        p = self.get_params_dict()
 
         def background_task():
             try:
-                self.run_simulation()
+                self.run_simulation_logic(p)
                 if not self.is_destroyed:
                     self.root.after(0, self.update_ui_after_run)
             except Exception as e:
                 if not self.is_destroyed:
-                    self.root.after(0, lambda: messagebox.showerror("錯誤", str(e)))
+                    self.root.after(0, lambda e=e: messagebox.showerror("錯誤", str(e)))
 
         threading.Thread(target=background_task, daemon=True).start()
 
@@ -457,50 +468,55 @@ class LaserApp:
         self.status_var.set(f"狀態：✅ 模擬完成！ | Beam 2w0: {d0:.2f}μm | Eff. Spot: {d_eff:.2f}μm")
 
     def on_scf_clicked(self):
-        target_depth = self.vars['exp_target_depth_um'].get()
-        target_spot = self.vars['exp_target_spot_um'].get()
         self.status_var.set(f"狀態：🔄 啟動物理約束 SCF 擬合...")
+        p = self.get_params_dict()
         
         def scf_task():
             tol = 0.015
+            current_m2 = p['M2']
+            current_delta = p['delta_um']
+
             for i in range(30):
                 if self.is_destroyed: break
-                self.run_simulation()
+                p['M2'] = current_m2
+                p['delta_um'] = current_delta
+                
+                self.run_simulation_logic(p)
                 Total_Depth = SIM_CACHE['Total_Depth_um']
                 ny, nx = Total_Depth.shape
-                center_region = Total_Depth[ny//4:3*ny//4, nx//4:3*ny//4]
+                center_region = Total_Depth[ny//4:3*ny//4, nx//4:3*nx//4]
                 sim_flat_depth = np.mean(center_region)
                 sim_spot = SIM_CACHE['d_eff_um']
 
                 if sim_spot <= 0 or sim_flat_depth <= 0:
-                    self.vars['M2'].set(max(self.vars['M2'].get() * 0.8, 1.0))
-                    self.vars['delta_um'].set(min(self.vars['delta_um'].get() * 1.2, 0.10))
+                    current_m2 = max(current_m2 * 0.8, 1.0)
+                    current_delta = min(current_delta * 1.2, 0.10)
                     continue
 
-                err_depth = (sim_flat_depth - target_depth) / target_depth
-                err_spot = (sim_spot - target_spot) / target_spot
+                err_depth = (sim_flat_depth - p['exp_target_depth_um']) / p['exp_target_depth_um']
+                err_spot = (sim_spot - p['exp_target_spot_um']) / p['exp_target_spot_um']
 
                 if abs(err_depth) < tol and abs(err_spot) < tol:
-                    msg = f"✅ SCF 於第 {i+1} 代收斂！M²={self.vars['M2'].get():.2f}, delta={self.vars['delta_um'].get():.4f}μm"
+                    msg = f"✅ SCF 於第 {i+1} 代收斂！M²={current_m2:.2f}, delta={current_delta:.4f}μm"
                     if not self.is_destroyed:
-                        self.root.after(0, lambda: self.finish_scf(msg))
+                        self.root.after(0, lambda m=msg, m2=current_m2, d=current_delta: self.finish_scf(m, m2, d))
                     return
 
-                spot_ratio = target_spot / sim_spot
-                new_m2 = np.clip(self.vars['M2'].get() * spot_ratio, 1.0, 3.0)
-                self.vars['M2'].set(float(round(new_m2, 2)))
+                spot_ratio = p['exp_target_spot_um'] / sim_spot
+                current_m2 = float(np.clip(current_m2 * spot_ratio, 1.0, 3.0))
 
-                depth_ratio = target_depth / sim_flat_depth
-                new_delta = np.clip(self.vars['delta_um'].get() * depth_ratio, 0.005, 0.120)
-                self.vars['delta_um'].set(float(round(new_delta, 4)))
+                depth_ratio = p['exp_target_depth_um'] / sim_flat_depth
+                current_delta = float(np.clip(current_delta * depth_ratio, 0.005, 0.120))
 
             if not self.is_destroyed:
-                self.root.after(0, lambda: self.finish_scf("⚠️ SCF 迭代完成"))
+                self.root.after(0, lambda m2=current_m2, d=current_delta: self.finish_scf("⚠️ SCF 迭代完成", m2, d))
 
         threading.Thread(target=scf_task, daemon=True).start()
 
-    def finish_scf(self, msg):
+    def finish_scf(self, msg, final_m2, final_delta):
         if self.is_destroyed: return
+        self.vars['M2'].set(round(final_m2, 2))
+        self.vars['delta_um'].set(round(final_delta, 4))
         self.render_plots()
         self.status_var.set(f"狀態：{msg}")
 
