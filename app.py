@@ -4,6 +4,10 @@ from tkinter import ttk, messagebox
 import threading
 import numpy as np
 import matplotlib.pyplot as plt
+
+# 設定 Matplotlib 支援 macOS 中文字型與正確顯示負號
+plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'PingFang SC', 'Heiti SC', 'STHeiti']
+plt.rcParams['axes.unicode_minus'] = False
 import matplotlib.gridspec as gridspec
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from numba import njit, prange
@@ -379,10 +383,13 @@ class LaserAblationApp(tk.Tk):
         a_um, b_um = self.get_val('a_um'), self.get_val('b_um')
         a_mm, b_mm = a_um / 1000.0, b_um / 1000.0
         h = ((a_mm - b_mm)**2) / ((a_mm + b_mm)**2 + 1e-12)
+        
+        # 加上防禦性保護，確保分母絕對不會是 0
         ellipse_perimeter_mm = np.pi * (a_mm + b_mm) * (1 + (3 * h) / (10 + np.sqrt(4 - 3 * h)))
+        ellipse_perimeter_mm = max(ellipse_perimeter_mm, 1e-6)
+        
         v_scan_val = self.get_val('v_scan')
         f_scan = 1e-5 if abs(v_scan_val) < 1e-5 else v_scan_val / ellipse_perimeter_mm
-
         period = 1.0 / abs(f_scan)
         total_time = self.get_val('num_cycles') * period
         dt = 1.0 / f_laser
