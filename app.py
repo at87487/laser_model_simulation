@@ -2,10 +2,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from numba import njit, prange
 
-# --- 1. 預設參數 (基於物理真實性與 SiO2 257.5nm/800fs 校正) ---
+# --- 1. 預設參數 (更正為物理合理的初值，避免初次載入時能量密度過高) ---
 DEFAULTS = {
     'v_stage': -1.0,       # mm/s
     'v_scan': 10.0,        # mm/s
@@ -19,26 +20,26 @@ DEFAULTS = {
 
     'wavelength_nm': 257.5,
     'M2': 1.2,             
-    'input_D_mm': 3.8,
-    'focal_length_mm': 5.0,
+    'input_D_mm': 2.0,     # 入射光徑改為 2.0 mm
+    'focal_length_mm': 10.0, # 透鏡焦距改為 10.0 mm (初始 Beam 2w0 ~ 2.0 μm)
     'defocus_um': 0.0,
     'pulse_width_fs': 800,
 
-    'P_avg_W': 0.25,
-    'F_th_1': 1.8,         # SiO2 典型 257.5nm 雙光子燒蝕閾值 ~ 1.8 J/cm²
-    'S_inc': 0.80,         # SiO2 典型孵化係數 ~ 0.80
-    'delta_um': 0.025,     # 物理微觀穿透深度 (25 nm)，嚴格鎖死於 10~50nm
-    'D_sat': 12.0,         # 側壁電漿遮蔽與孔洞幾何飽和深度 (μm)
+    'P_avg_W': 0.05,       # 初始功率調為 0.05W，避免初次載入時過度燒蝕
+    'F_th_1': 1.8,         # SiO2 典型 257.5nm 燒蝕閾值
+    'S_inc': 0.80,         # 孵化係數
+    'delta_um': 0.025,     # 穿透深度 (25 nm)
+    'D_sat': 12.0,         # 幾何飽和深度 (μm)
 
-    'grid_res': 200,
+    'grid_res': 180,
     'elev': 30,
     'azim': -60,
     'slice_x_um': 0.0,
     'slice_y_um': 0.0,
     'show_spots': True,
 
-    'exp_target_depth_um': 18.0, # 實驗目標底部平整深度 (μm)
-    'exp_target_spot_um': 1.4    # 實驗量測有效加工痕跡 (Effective Spot Size, μm)
+    'exp_target_depth_um': 18.0, # 實驗目標深度 (μm)
+    'exp_target_spot_um': 1.4    # 實驗目標光斑 (μm)
 }
 
 SIM_CACHE = {
@@ -51,7 +52,7 @@ SIM_CACHE = {
     'f_laser': 0, 'F0_z': 0, 'E_p': 0
 }
 
-# 💡 物理修正版：包含深溝槽波導聚焦與焦區熱平滑效應 (Numba 加速)
+# --- 2. 物理燒蝕核心 (Numba 加速) ---
 @njit(parallel=True, fastmath=True)
 def compute_single_pass_ablation_experiment_matched(
     x_grid_um, y_grid_um, x_spots_um, y_spots_um, 
@@ -65,11 +66,11 @@ def compute_single_pass_ablation_experiment_matched(
     updated_depth = current_depth.copy()
     w_sq = w_spot_um * w_spot_um
     
-    # 1. 空間熱擴散平滑：高頻下熱影響區(HAZ)重疊，抹平鋸齒
-    effective_w_sq = w_sq * 2.8  
-    cutoff_r_sq = 3.5 * 3.5 * effective_w_sq
+    # 熱擴散區域抹平
+    effective_w_sq = w_sq * 2.2  
+    cutoff_r_sq = 3.0 * 3.0 * effective_w_sq
 
-    # 2. 100 kHz 飛秒強場多光子爆發增益
+    # 頻率熱累積效應
     heat_accum_factor = 1.0 + 0.12 * (f_laser_khz ** 0.65)
 
     for s in prange(n_spots):
@@ -89,8 +90,8 @@ def compute_single_pass_ablation_experiment_matched(
                 if r_sq < cutoff_r_sq:
                     current_d = updated_depth[i, j]
 
-                    # 3. 深溝槽光學波導 / 側壁反射聚焦增益 (自聚焦 Trapping)
-                    trapping_gain = 1.0 + 0.35 * current_d 
+                    # 深溝槽波導自聚焦增益
+                    trapping_gain = 1.0 + 0.25 * current_d 
 
                     w_deeper_sq = effective_w_sq * (1.0 + (current_d / zR_um)**2)
                     F0_deeper = F0 * (effective_w_sq / w_deeper_sq) * trapping_gain
@@ -108,8 +109,8 @@ def compute_single_pass_ablation_experiment_matched(
 class LaserAblationApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("SiO2 飛秒雷射多 Pass 燒蝕與光學熱效應模擬器 (Tkinter 版)")
-        self.geometry("1400x900")
+        self.title("SiO2 飛秒雷射多 Pass 燒蝕與光學熱效應模擬器 (排版修正版)")
+        self.geometry("1450x920")
 
         self.params = {k: tk.DoubleVar(value=v) if isinstance(v, float) else tk.IntVar(value=v) 
                        for k, v in DEFAULTS.items()}
@@ -143,7 +144,6 @@ class LaserAblationApp(tk.Tk):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         # --- 控制項群組 ---
-        # 1. 馬達與掃描軌跡
         lf_motion = ttk.LabelFrame(scrollable_frame, text="🌀 運動控制與掃描軌跡", padding="5")
         lf_motion.pack(fill=tk.X, pady=5)
         self.add_slider(lf_motion, 'v_stage', 'v_stage (mm/s)', -10.0, 10.0, 0.5)
@@ -156,7 +156,6 @@ class LaserAblationApp(tk.Tk):
         self.add_slider(lf_motion, 'b_um', 'Minor b (μm)', 1.0, 100.0, 1.0)
         self.add_slider(lf_motion, 'phase_shift_deg', 'Pass 相位差 (°)', 0.0, 360.0, 15.0)
 
-        # 2. 光學與聚焦面板
         lf_optics = ttk.LabelFrame(scrollable_frame, text="🔍 光學與焦區系統", padding="5")
         lf_optics.pack(fill=tk.X, pady=5)
         self.add_slider(lf_optics, 'wavelength_nm', '波長 λ (nm)', 257.5, 1070.0, 0.5)
@@ -166,16 +165,14 @@ class LaserAblationApp(tk.Tk):
         self.add_slider(lf_optics, 'defocus_um', '離焦量 Δz (μm)', -100.0, 100.0, 1.0)
         self.add_slider(lf_optics, 'pulse_width_fs', '脈寬 τ (fs)', 50, 5000, 50, is_int=True)
 
-        # 3. 雷射功率與 SiO2 物理
         lf_physics = ttk.LabelFrame(scrollable_frame, text="⚡ 雷射功率與 SiO2 物理參數", padding="5")
         lf_physics.pack(fill=tk.X, pady=5)
-        self.add_slider(lf_physics, 'P_avg_W', 'Power (W)', 0.01, 10.0, 0.05)
+        self.add_slider(lf_physics, 'P_avg_W', 'Power (W)', 0.01, 10.0, 0.01)
         self.add_slider(lf_physics, 'F_th_1', 'F_th_1 (J/cm²)', 0.5, 5.0, 0.1)
         self.add_slider(lf_physics, 'S_inc', '孵化係數 S', 0.70, 0.95, 0.01)
         self.add_slider(lf_physics, 'delta_um', 'delta (μm)', 0.005, 0.150, 0.001)
         self.add_slider(lf_physics, 'D_sat', 'D_sat (μm)', 1.0, 50.0, 0.5)
 
-        # 4. 物理約束 SCF 擬合面板
         lf_scf = ttk.LabelFrame(scrollable_frame, text="🎯 物理約束 SCF 實驗雙參數擬合", padding="5")
         lf_scf.pack(fill=tk.X, pady=5)
         self.add_slider(lf_scf, 'exp_target_depth_um', '實驗底部深度 (μm)', 1.0, 100.0, 0.5)
@@ -184,7 +181,6 @@ class LaserAblationApp(tk.Tk):
         btn_scf = ttk.Button(lf_scf, text="🔄 執行物理約束 SCF 擬合", command=self.run_scf_fitting)
         btn_scf.pack(fill=tk.X, pady=5)
 
-        # 5. 切面與顯示控制
         lf_view = ttk.LabelFrame(scrollable_frame, text="🔪 視角與剖面切面控制", padding="5")
         lf_view.pack(fill=tk.X, pady=5)
         self.add_slider(lf_view, 'grid_res', '網格解析度', 100, 300, 25, is_int=True, auto_render=True)
@@ -197,7 +193,6 @@ class LaserAblationApp(tk.Tk):
         chk_spots = ttk.Checkbutton(lf_view, text="顯示軌跡與脈衝點", variable=self.chk_show_spots, command=self.render_plots)
         chk_spots.pack(anchor=tk.W, pady=2)
 
-        # 按鈕與狀態列
         btn_run = ttk.Button(scrollable_frame, text="🚀 開始模擬", command=self.on_btn_run)
         btn_run.pack(fill=tk.X, pady=10)
 
@@ -208,7 +203,7 @@ class LaserAblationApp(tk.Tk):
         right_frame = ttk.Frame(main_frame)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        self.fig = plt.figure(figsize=(12, 8), dpi=100)
+        self.fig = plt.figure(figsize=(13, 8.5))
         self.canvas = FigureCanvasTkAgg(self.fig, master=right_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
@@ -246,7 +241,7 @@ class LaserAblationApp(tk.Tk):
         self.params[key].set(val)
 
     def on_btn_run(self):
-        self.lbl_status.config(text="狀態：⚡ 正在計算物理修正版 SiO2 多 Pass 燒蝕與熱累積...")
+        self.lbl_status.config(text="狀態：⚡ 正在計算物理修正版 SiO2 多 Pass 燒蝕...")
         self.update_idletasks()
         self.run_simulation()
         self.render_plots()
@@ -315,7 +310,7 @@ class LaserAblationApp(tk.Tk):
             all_x_spots.extend(x_p)
             all_y_spots.extend(y_p)
 
-        margin_um = w_z_um * 3.5
+        margin_um = max(w_z_um * 3.5, 3.0)
         x_min, x_max = np.min(all_x_spots) - margin_um, np.max(all_x_spots) + margin_um
         y_min, y_max = np.min(all_y_spots) - margin_um, np.max(all_y_spots) + margin_um
 
@@ -367,7 +362,7 @@ class LaserAblationApp(tk.Tk):
         self.lbl_status.config(text=f"狀態：🔄 啟動物理約束 SCF 擬合 (目標: 深度={target_depth}μm, 光斑痕跡={target_spot}μm)...")
         self.update_idletasks()
 
-        tol = 0.015  # 1.5% 容許誤差範圍
+        tol = 0.015
 
         for i in range(30):
             self.run_simulation()
@@ -393,12 +388,10 @@ class LaserAblationApp(tk.Tk):
                 self.lbl_status.config(text=msg)
                 return
 
-            # 1. 修正 M² (硬邊界 1.0 ~ 3.0)
             spot_ratio = target_spot / sim_spot
             new_m2 = np.clip(self.get_val('M2') * spot_ratio, 1.0, 3.0)
             self.set_val('M2', float(round(new_m2, 2)))
 
-            # 2. 修正 delta_um (上限放寬至 0.120 μm)
             depth_ratio = target_depth / sim_flat_depth
             new_delta = np.clip(self.get_val('delta_um') * depth_ratio, 0.005, 0.120)
             self.set_val('delta_um', float(round(new_delta, 4)))
@@ -415,18 +408,21 @@ class LaserAblationApp(tk.Tk):
 
         self.fig.clear()
 
+        # 使用 GridSpec 進行緊湊且不重疊的版面控制
+        gs = gridspec.GridSpec(2, 3, figure=self.fig, wspace=0.35, hspace=0.38)
+
         X, Y = SIM_CACHE['X'], SIM_CACHE['Y']
         Total_Depth_um = SIM_CACHE['Total_Depth_um']
         x_grid_um = SIM_CACHE['x_grid_um']
         y_grid_um = SIM_CACHE['y_grid_um']
         all_pass_spots = SIM_CACHE['all_pass_spots']
 
-        ax1 = self.fig.add_subplot(2, 3, 1, projection='3d')
-        ax2 = self.fig.add_subplot(2, 3, 2)
-        ax3 = self.fig.add_subplot(2, 3, 3)
-        ax4 = self.fig.add_subplot(2, 3, 4)
-        ax5 = self.fig.add_subplot(2, 3, 5)
-        ax6 = self.fig.add_subplot(2, 3, 6)
+        ax1 = self.fig.add_subplot(gs[0, 0], projection='3d')
+        ax2 = self.fig.add_subplot(gs[0, 1])
+        ax3 = self.fig.add_subplot(gs[0, 2])
+        ax4 = self.fig.add_subplot(gs[1, 0])
+        ax5 = self.fig.add_subplot(gs[1, 1])
+        ax6 = self.fig.add_subplot(gs[1, 2])
 
         # 1. 3D Surface
         ax1.plot_surface(X, Y, -Total_Depth_um, cmap='viridis', edgecolor='none', alpha=0.95)
@@ -436,8 +432,10 @@ class LaserAblationApp(tk.Tk):
         center_region = Total_Depth_um[ny//4:3*ny//4, nx//4:3*nx//4]
         flat_bottom_depth = np.mean(center_region)
 
-        ax1.set_title(f"3D Surface (Flat Depth: {flat_bottom_depth:.2f} μm)", fontsize=9)
-        ax1.set_xlabel("X (μm)"); ax1.set_ylabel("Y (μm)"); ax1.set_zlabel("Depth (μm)")
+        ax1.set_title(f"3D Surface (Depth: {flat_bottom_depth:.2f} μm)", fontsize=9, pad=2)
+        ax1.set_xlabel("X (μm)", fontsize=8)
+        ax1.set_ylabel("Y (μm)", fontsize=8)
+        ax1.set_zlabel("Depth", fontsize=8)
 
         # 2. 2D Top-View
         c = ax2.contourf(X, Y, Total_Depth_um, levels=50, cmap='inferno')
@@ -449,7 +447,6 @@ class LaserAblationApp(tk.Tk):
                 if len(xs_arr) == len(ys_arr) and len(xs_arr) > 0:
                     col = colors[p_idx % len(colors)]
                     ax2.plot(xs_arr, ys_arr, color=col, linestyle='--', linewidth=0.8, alpha=0.7)
-                    ax2.scatter(xs_arr, ys_arr, color='white', edgecolors='none', s=8, alpha=0.9, zorder=3)
 
         idx_x = int(np.clip((np.abs(x_grid_um - self.get_val('slice_x_um'))).argmin(), 0, len(x_grid_um) - 1))
         idx_y = int(np.clip((np.abs(y_grid_um - self.get_val('slice_y_um'))).argmin(), 0, len(y_grid_um) - 1))
@@ -458,25 +455,27 @@ class LaserAblationApp(tk.Tk):
         ax2.axvline(x_grid_um[idx_x], color='cyan', linestyle='--', linewidth=1.2, alpha=0.7)
 
         f_laser_khz = SIM_CACHE['f_laser'] / 1000.0
-        title_str = (f"2D Top-View (Rep: {f_laser_khz:.1f} kHz | M²: {self.get_val('M2'):.2f})\n"
-                     f"Beam 2w0: {SIM_CACHE['d0_um']:.2f}μm | Eff Spot: {SIM_CACHE['d_eff_um']:.2f}μm")
-        ax2.set_title(title_str, fontsize=9)
-        ax2.set_xlabel("X (μm)"); ax2.set_ylabel("Y (μm)")
-        self.fig.colorbar(c, ax=ax2, label='Depth (μm)')
+        ax2.set_title(f"2D Top-View (Rep: {f_laser_khz:.0f}kHz)\nSpot: {SIM_CACHE['d_eff_um']:.2f}μm", fontsize=9)
+        ax2.set_xlabel("X (μm)", fontsize=8)
+        ax2.set_ylabel("Y (μm)", fontsize=8)
+        cbar = self.fig.colorbar(c, ax=ax2, fraction=0.046, pad=0.04)
+        cbar.ax.tick_params(labelsize=7)
 
         # 3. X Profile
         x_prof = Total_Depth_um[idx_y, :]
         ax3.plot(x_grid_um, x_prof, 'r-', linewidth=1.5)
-        ax3.set_title(f"X-Profile (at Y = {y_grid_um[idx_y]:.2f} μm)", fontsize=9)
-        ax3.set_xlabel("X (μm)"); ax3.set_ylabel("Depth (μm)")
+        ax3.set_title(f"X-Profile (Y = {y_grid_um[idx_y]:.1f} μm)", fontsize=9)
+        ax3.set_xlabel("X (μm)", fontsize=8)
+        ax3.set_ylabel("Depth (μm)", fontsize=8)
         ax3.grid(True, linestyle=':', alpha=0.6)
         ax3.invert_yaxis()
 
         # 4. Y Profile
         y_prof = Total_Depth_um[:, idx_x]
         ax4.plot(y_grid_um, y_prof, 'c-', linewidth=1.5)
-        ax4.set_title(f"Y-Profile (at X = {x_grid_um[idx_x]:.2f} μm)", fontsize=9)
-        ax4.set_xlabel("Y (μm)"); ax4.set_ylabel("Depth (μm)")
+        ax4.set_title(f"Y-Profile (X = {x_grid_um[idx_x]:.1f} μm)", fontsize=9)
+        ax4.set_xlabel("Y (μm)", fontsize=8)
+        ax4.set_ylabel("Depth (μm)", fontsize=8)
         ax4.grid(True, linestyle=':', alpha=0.6)
         ax4.invert_yaxis()
 
@@ -484,22 +483,23 @@ class LaserAblationApp(tk.Tk):
         mean_depth_y = np.mean(Total_Depth_um, axis=1)
         ax5.plot(y_grid_um, mean_depth_y, 'g-', linewidth=1.8, label='Mean Depth')
         ax5.axvline(y_grid_um[idx_y], color='red', linestyle='--', alpha=0.5, label='Current Y Slice')
-        ax5.set_title("Average Depth vs. Y-Position", fontsize=9)
-        ax5.set_xlabel("Y (μm)"); ax5.set_ylabel("Average Depth (μm)")
+        ax5.set_title("Average Depth vs. Y", fontsize=9)
+        ax5.set_xlabel("Y (μm)", fontsize=8)
+        ax5.set_ylabel("Avg Depth (μm)", fontsize=8)
         ax5.grid(True, linestyle=':', alpha=0.6)
         ax5.invert_yaxis()
-        ax5.legend(fontsize=8)
+        ax5.legend(fontsize=7)
 
         # 6. Pass 深度累積
         pass_depths = SIM_CACHE['pass_depth_history']
         p_range = np.arange(1, len(pass_depths) + 1, dtype=int)
         ax6.plot(p_range, pass_depths, 'bo-', linewidth=2, markersize=6, label='Simulated Depth')
         ax6.set_title("Depth vs. Passes", fontsize=9)
-        ax6.set_xlabel("Passes"); ax6.set_ylabel("Max Depth (μm)")
+        ax6.set_xlabel("Passes", fontsize=8)
+        ax6.set_ylabel("Max Depth (μm)", fontsize=8)
         ax6.grid(True, linestyle=':', alpha=0.6)
-        ax6.legend(fontsize=8)
+        ax6.legend(fontsize=7)
 
-        self.fig.tight_layout()
         self.canvas.draw()
 
 
