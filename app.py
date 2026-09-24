@@ -105,7 +105,7 @@ class LaserApp:
     def __init__(self, root):
         self.root = root
         self.root.title("SiO2 飛秒雷射加工物理模擬與 SCF 擬合系統")
-        self.root.geometry("1450\\times950")
+        self.root.geometry("1450x950")
         
         self.is_destroyed = False
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -505,7 +505,7 @@ class LaserApp:
         self.status_var.set(f"狀態：{msg}")
 
     def on_close(self):
-        self.is_destroyed =- True
+        self.is_destroyed = True
         self.root.destroy()
 
 if __name__ == "__main__":
