@@ -351,55 +351,57 @@ class LaserAblationApp(tk.Tk):
         self.lbl_status.config(text=f"狀態：模擬完成！\nBeam 2w0: {d0:.2f}μm | Eff Spot: {d_eff:.2f}μm")
 
     def run_simulation(self):
-        wavelength_m = self.get_val('wavelength_nm') * 1e-9
-        M2 = max(self.get_val('M2'), 1e-6)
-        D_m = max(self.get_val('input_D_mm') * 1e-3, 1e-6)
-        f_m = max(self.get_val('focal_length_mm') * 1e-3, 1e-6)
-        defocus_m = self.get_val('defocus_um') * 1e-6
+        # 強制全部轉為 float 並加強防禦性保護
+        wavelength_m = float(self.get_val('wavelength_nm')) * 1e-9
+        M2 = max(float(self.get_val('M2')), 1e-6)
+        D_m = max(float(self.get_val('input_D_mm')) * 1e-3, 1e-6)
+        f_m = max(float(self.get_val('focal_length_mm')) * 1e-3, 1e-6)
+        defocus_m = float(self.get_val('defocus_um')) * 1e-6
 
-        w0_m = (2.0 * wavelength_m * f_m * M2) / (np.pi * D_m)
+        w0_m = (2.0 * wavelength_m * f_m * M2) / max(np.pi * D_m, 1e-12)
         w0_um = w0_m * 1e6
         d0_um = 2.0 * w0_um
 
         zR_m = max((np.pi * w0_m**2) / max(wavelength_m * M2, 1e-12), 1e-12)
-        w_z_m = w0_m * np.sqrt(1.0 + (defocus_m / zR_m)**2)
+        w_z_m = w0_m * np.sqrt(max(1.0 + (defocus_m / zR_m)**2, 1e-12))
         w_z_um = w_z_m * 1e6
 
         divider_val = max(float(self.get_val('divider')), 1e-6)
-        f_laser = (self.get_val('f_base_khz') * 1000.0) / divider_val
-        E_p = self.get_val('P_avg_W') / max(f_laser, 1e-6)
+        f_laser = max((float(self.get_val('f_base_khz')) * 1000.0) / divider_val, 1e-6)
+        E_p = float(self.get_val('P_avg_W')) / f_laser
         w_z_cm = w_z_m * 100.0
         F0_z = (2.0 * E_p) / max(np.pi * (w_z_cm**2), 1e-12)
 
-        F_th_1 = self.get_val('F_th_1')
+        F_th_1 = float(self.get_val('F_th_1'))
         if F0_z > F_th_1:
-            d_eff_um = 2.0 * w_z_um * np.sqrt(0.5 * np.log(F0_z / F_th_1))
+            d_eff_um = 2.0 * w_z_um * np.sqrt(max(0.5 * np.log(F0_z / F_th_1), 0.0))
         else:
             d_eff_um = 0.0
 
-        v_stage_um_s = abs(self.get_val('v_stage')) * 1000.0
-        pitch_stage_um = v_stage_um_s / max(f_laser, 1e-6)
+        v_stage_um_s = abs(float(self.get_val('v_stage'))) * 1000.0
+        pitch_stage_um = v_stage_um_s / f_laser
         overlap_rate = (1.0 - (pitch_stage_um / max(d0_um, 1e-6))) * 100.0
 
-        a_um, b_um = self.get_val('a_um'), self.get_val('b_um')
+        a_um = float(self.get_val('a_um'))
+        b_um = float(self.get_val('b_um'))
         a_mm = max(a_um / 1000.0, 1e-6)
         b_mm = max(b_um / 1000.0, 1e-6)
         
-        # 使用強健的 Ramanujan 橢圓周長近似公式，並強制絕對安全保底
-        h = ((a_mm - b_mm) / (a_mm + b_mm))**2
+        # 嚴格的 Ramanujan 橢圓周長計算與強制絕對安全保底
+        h = ((a_mm - b_mm) / max(a_mm + b_mm, 1e-12))**2
         ellipse_perimeter_mm = np.pi * (a_mm + b_mm) * (1.0 + (3.0 * h) / (10.0 + np.sqrt(max(4.0 - 3.0 * h, 1e-6))))
         ellipse_perimeter_mm = max(ellipse_perimeter_mm, 1e-3)
         
-        v_scan_val = self.get_val('v_scan')
+        v_scan_val = float(self.get_val('v_scan'))
         f_scan = 1e-5 if abs(v_scan_val) < 1e-5 else v_scan_val / ellipse_perimeter_mm
         period = 1.0 / max(abs(f_scan), 1e-6)
-        total_time = self.get_val('num_cycles') * period
-        dt = 1.0 / max(f_laser, 1e-6)
+        total_time = float(self.get_val('num_cycles')) * period
+        dt = 1.0 / f_laser
         t = np.arange(0, total_time, dt)
         if len(t) > 20000: t = t[:20000]
 
-        total_passes = int(self.get_val('passes'))
-        phase_shift_rad = np.radians(self.get_val('phase_shift_deg'))
+        total_passes = int(float(self.get_val('passes')))
+        phase_shift_rad = np.radians(float(self.get_val('phase_shift_deg')))
 
         all_pass_spots = []
         all_x_spots = []
@@ -407,7 +409,7 @@ class LaserAblationApp(tk.Tk):
 
         for p in range(total_passes):
             current_phase = p * phase_shift_rad
-            x_p = np.ascontiguousarray(a_um * np.cos(2 * np.pi * f_scan * t + current_phase) + (self.get_val('v_stage') * 1000.0) * t)
+            x_p = np.ascontiguousarray(a_um * np.cos(2 * np.pi * f_scan * t + current_phase) + (float(self.get_val('v_stage')) * 1000.0) * t)
             y_p = np.ascontiguousarray(b_um * np.sin(2 * np.pi * f_scan * t + current_phase))
 
             all_pass_spots.append((x_p, y_p))
@@ -418,7 +420,7 @@ class LaserAblationApp(tk.Tk):
         x_min, x_max = np.min(all_x_spots) - margin_um, np.max(all_x_spots) + margin_um
         y_min, y_max = np.min(all_y_spots) - margin_um, np.max(all_y_spots) + margin_um
 
-        res = int(self.get_val('grid_res'))
+        res = int(float(self.get_val('grid_res')))
         x_grid_um = np.ascontiguousarray(np.linspace(x_min, x_max, res))
         y_grid_um = np.ascontiguousarray(np.linspace(y_min, y_max, res))
         X, Y = np.meshgrid(x_grid_um, y_grid_um)
@@ -426,8 +428,8 @@ class LaserAblationApp(tk.Tk):
         current_depth = np.zeros((res, res), dtype=np.float64)
         pass_history = []
 
-        S_inc = self.get_val('S_inc')
-        delta_um = max(self.get_val('delta_um'), 1e-6)
+        S_inc = float(self.get_val('S_inc'))
+        delta_um = max(float(self.get_val('delta_um')), 1e-6)
 
         for p in range(total_passes):
             x_p, y_p = all_pass_spots[p]
@@ -459,8 +461,8 @@ class LaserAblationApp(tk.Tk):
 
     def on_btn_scf(self):
         self.set_ui_state("disabled")
-        target_depth = self.get_val('exp_target_depth_um')
-        target_spot = self.get_val('exp_target_spot_um')
+        target_depth = float(self.get_val('exp_target_depth_um'))
+        target_spot = float(self.get_val('exp_target_spot_um'))
         self.lbl_status.config(text=f"狀態：背景執行中：物理約束 SCF 擬合 (目標深度={target_depth}μm)...")
         threading.Thread(target=self._run_scf_task, daemon=True).start()
 
@@ -481,18 +483,18 @@ class LaserAblationApp(tk.Tk):
                     break
 
                 ny, nx = Total_Depth.shape
-                center_region = Total_Depth[ny//4:3*ny//4, nx//4:3*ny//4]
-                sim_flat_depth = np.mean(center_region)
-                sim_spot = SIM_CACHE['d_eff_um']
+                center_region = Total_Depth[ny//4:3*ny//4, nx//4:3*nx//4]
+                sim_flat_depth = float(np.mean(center_region))
+                sim_spot = float(SIM_CACHE['d_eff_um'])
 
                 if sim_spot <= 0 or sim_flat_depth <= 0 or np.isnan(sim_flat_depth):
                     print("數值異常，調整參數重試...")
-                    self.set_val('M2', max(self.get_val('M2') * 0.8, 1.0))
-                    self.set_val('delta_um', min(self.get_val('delta_um') * 1.2, 0.10))
+                    self.set_val('M2', max(float(self.get_val('M2')) * 0.8, 1.0))
+                    self.set_val('delta_um', min(float(self.get_val('delta_um')) * 1.2, 0.10))
                     continue
 
-                err_depth = (sim_flat_depth - target_depth) / target_depth
-                err_spot = (sim_spot - target_spot) / target_spot
+                err_depth = (sim_flat_depth - target_depth) / max(target_depth, 1e-6)
+                err_spot = (sim_spot - target_spot) / max(target_spot, 1e-6)
 
                 if abs(err_depth) < tol and abs(err_spot) < tol:
                     print(f"SCF 於第 {i+1} 代收斂！")
@@ -501,11 +503,11 @@ class LaserAblationApp(tk.Tk):
                     return
 
                 spot_ratio = target_spot / max(sim_spot, 1e-6)
-                new_m2 = np.clip(self.get_val('M2') * spot_ratio, 1.0, 3.0)
+                new_m2 = np.clip(float(self.get_val('M2')) * spot_ratio, 1.0, 3.0)
                 self.set_val('M2', float(round(new_m2, 2)))
 
                 depth_ratio = target_depth / max(sim_flat_depth, 1e-6)
-                new_delta = np.clip(self.get_val('delta_um') * depth_ratio, 0.005, 0.120)
+                new_delta = np.clip(float(self.get_val('delta_um')) * depth_ratio, 0.005, 0.120)
                 self.set_val('delta_um', float(round(new_delta, 4)))
 
             if not self.is_destroyed:
@@ -553,7 +555,7 @@ class LaserAblationApp(tk.Tk):
         ax6 = self.fig.add_subplot(gs[1, 2])
 
         ax1.plot_surface(X, Y, -Total_Depth_um, cmap='viridis', edgecolor='none', alpha=0.95)
-        ax1.view_init(elev=int(self.get_val('elev')), azim=int(self.get_val('azim')))
+        ax1.view_init(elev=int(float(self.get_val('elev'))), azim=int(float(self.get_val('azim'))))
 
         ny, nx = Total_Depth_um.shape
         center_region = Total_Depth_um[ny//4:3*ny//4, nx//4:3*nx//4]
@@ -574,8 +576,8 @@ class LaserAblationApp(tk.Tk):
                     col = colors[p_idx % len(colors)]
                     ax2.plot(xs_arr, ys_arr, color=col, linestyle='--', linewidth=0.8, alpha=0.7)
 
-        idx_x = int(np.clip((np.abs(x_grid_um - self.get_val('slice_x_um'))).argmin(), 0, len(x_grid_um) - 1))
-        idx_y = int(np.clip((np.abs(y_grid_um - self.get_val('slice_y_um'))).argmin(), 0, len(y_grid_um) - 1))
+        idx_x = int(np.clip((np.abs(x_grid_um - float(self.get_val('slice_x_um')))).argmin(), 0, len(x_grid_um) - 1))
+        idx_y = int(np.clip((np.abs(y_grid_um - float(self.get_val('slice_y_um')))).argmin(), 0, len(y_grid_um) - 1))
 
         ax2.axhline(y_grid_um[idx_y], color='red', linestyle='--', linewidth=1.2, alpha=0.7)
         ax2.axvline(x_grid_um[idx_x], color='cyan', linestyle='--', linewidth=1.2, alpha=0.7)
