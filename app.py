@@ -10,30 +10,30 @@ from numba import njit, prange
 
 # --- 1. 預設參數 ---
 DEFAULTS = {
-    'v_stage': -1.0,       # mm/s
-    'v_scan': 10.0,        # mm/s
-    'f_base_khz': 1000,    # kHz
-    'divider': 10,         # 實際發射頻率 100 kHz
+    'v_stage': -1.0,        # mm/s
+    'v_scan': 10.0,         # mm/s
+    'f_base_khz': 1000,     # kHz
+    'divider': 10,          # 實際發射頻率 100 kHz
     'num_cycles': 20,
-    'passes': 2,           # 加工次數
-    'a_um': 4.0,           # μm
-    'b_um': 8.0,           # μm
+    'passes': 2,            # 加工次數
+    'a_um': 4.0,            # μm
+    'b_um': 8.0,            # μm
     'phase_shift_deg': 180.0, # Pass 間相位錯位角度 (度)
 
     'wavelength_nm': 257.5,
-    'M2': 1.2,             
-    'input_D_mm': 2.0,     # 入射光徑 (mm)
+    'M2': 1.2,              
+    'input_D_mm': 2.0,      # 入射光徑 (mm)
     'focal_length_mm': 10.0, # 透鏡焦距 (mm)
     'defocus_um': 0.0,
     'pulse_width_fs': 800,
 
-    'P_avg_W': 0.05,       # 平均功率 (W)
-    'F_th_1': 1.8,         # SiO2 燒蝕閾值 (J/cm²)
-    'S_inc': 0.80,         # 孵化係數
-    'delta_um': 0.025,     # 穿透深度 (μm)
-    'D_sat': 12.0,         # 飽和深度 (μm)
+    'P_avg_W': 0.05,        # 平均功率 (W)
+    'F_th_1': 1.8,          # SiO2 燒蝕閾值 (J/cm²)
+    'S_inc': 0.80,          # 孵化係數
+    'delta_um': 0.025,      # 穿透深度 (μm)
+    'D_sat': 12.0,          # 飽和深度 (μm)
 
-    'grid_res': 100,       # 預設稍微調降以兼顧流暢度
+    'grid_res': 100,        # 預設稍微調降以兼顧流暢度
     'elev': 30,
     'azim': -60,
     'slice_x_um': 0.0,
@@ -55,7 +55,7 @@ SIM_CACHE = {
 }
 
 # --- 2. 物理燒蝕核心 (Numba 加速) ---
-@njit(parallel=True, fastmath=True)
+@njit(fastmath=True)
 def compute_single_pass_ablation_experiment_matched(
     X, Y, spot_centers, E_pulse, w0, alpha, F_th_0, S_inc,
     k_inc, k_thermal, enable_inc, enable_thermal,
@@ -80,7 +80,7 @@ def compute_single_pass_ablation_experiment_matched(
         j_min = max(0, int(np.floor((yc - r_cut - y_min) / dy)))
         j_max = min(ny, int(np.ceil((yc + r_cut - y_min) / dy)))
         
-        for i in prange(i_min, i_max):
+        for i in range(i_min, i_max):
             for j in range(j_min, j_max):
                 x = X[i, j]
                 y = Y[i, j]
@@ -151,14 +151,17 @@ class LaserAblationApp(tk.Tk):
         
         self.scrollable_frame = ttk.Frame(self.canvas_scroll)
 
+        # 安全防護：使用字串相加避免編輯器過濾尖括號
+        CONFIG_EVENT = "<" + "Configure" + ">"
+
         self.scrollable_frame.bind(
-            "\x3cConfigure\x3e", 
+            CONFIG_EVENT, 
             lambda e: self.canvas_scroll.configure(scrollregion=self.canvas_scroll.bbox("all"))
         )
 
         self.canvas_window = self.canvas_scroll.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas_scroll.configure(yscrollcommand=self.scrollbar.set)
-        self.canvas_scroll.bind("\x3cConfigure\x3e", self._on_canvas_configure)
+        self.canvas_scroll.bind(CONFIG_EVENT, self._on_canvas_configure)
 
         self.canvas_scroll.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -239,26 +242,34 @@ class LaserAblationApp(tk.Tk):
         self.canvas_scroll.itemconfig(self.canvas_window, width=event.width)
 
     def bind_mousewheel_recursive(self, widget):
-        widget.bind("\x3cEnter\x3e", lambda e: self._bind_mousewheel())
-        widget.bind("\x3cLeave\x3e", lambda e: self._unbind_mousewheel())
+        ENTER_EVENT = "<" + "Enter" + ">"
+        LEAVE_EVENT = "<" + "Leave" + ">"
+        widget.bind(ENTER_EVENT, lambda e: self._bind_mousewheel())
+        widget.bind(LEAVE_EVENT, lambda e: self._unbind_mousewheel())
         for child in widget.winfo_children():
             self.bind_mousewheel_recursive(child)
 
     def _bind_mousewheel(self):
+        WHEEL_EVENT = "<" + "MouseWheel" + ">"
+        BTN4_EVENT = "<" + "Button-4" + ">"
+        BTN5_EVENT = "<" + "Button-5" + ">"
         if sys.platform.startswith('darwin'):
-            self.canvas_scroll.bind_all("\x3cMouseWheel\x3e", lambda e: self.canvas_scroll.yview_scroll(-1 * e.delta, "units"))
+            self.canvas_scroll.bind_all(WHEEL_EVENT, lambda e: self.canvas_scroll.yview_scroll(-1 * e.delta, "units"))
         elif sys.platform.startswith('win'):
-            self.canvas_scroll.bind_all("\x3cMouseWheel\x3e", lambda e: self.canvas_scroll.yview_scroll(-1 * int(e.delta / 120), "units"))
+            self.canvas_scroll.bind_all(WHEEL_EVENT, lambda e: self.canvas_scroll.yview_scroll(-1 * int(e.delta / 120), "units"))
         else:
-            self.canvas_scroll.bind_all("\x3cButton-4\x3e", lambda e: self.canvas_scroll.yview_scroll(-1, "units"))
-            self.canvas_scroll.bind_all("\x3cButton-5\x3e", lambda e: self.canvas_scroll.yview_scroll(1, "units"))
+            self.canvas_scroll.bind_all(BTN4_EVENT, lambda e: self.canvas_scroll.yview_scroll(-1, "units"))
+            self.canvas_scroll.bind_all(BTN5_EVENT, lambda e: self.canvas_scroll.yview_scroll(1, "units"))
 
     def _unbind_mousewheel(self):
+        WHEEL_EVENT = "<" + "MouseWheel" + ">"
+        BTN4_EVENT = "<" + "Button-4" + ">"
+        BTN5_EVENT = "<" + "Button-5" + ">"
         if sys.platform.startswith('win') or sys.platform.startswith('darwin'):
-            self.canvas_scroll.unbind_all("\x3cMouseWheel\x3e")
+            self.canvas_scroll.unbind_all(WHEEL_EVENT)
         else:
-            self.canvas_scroll.unbind_all("\x3cButton-4\x3e")
-            self.canvas_scroll.unbind_all("\x3cButton-5\x3e")
+            self.canvas_scroll.unbind_all(BTN4_EVENT)
+            self.canvas_scroll.unbind_all(BTN5_EVENT)
 
     def add_slider(self, parent, param_key, label_text, from_, to, resolution, is_int=False, auto_render=False):
         frame = ttk.Frame(parent)
@@ -303,7 +314,6 @@ class LaserAblationApp(tk.Tk):
             self.btn_run.config(state=state)
             self.btn_scf.config(state=state)
 
-    # --- 透過執行緒包裝的模擬按鈕 ---
     def on_btn_run(self):
         self.set_ui_state("disabled")
         self.lbl_status.config(text="狀態：⚡ 背景運算中：正在計算物理修正版 SiO2 多 Pass 燒蝕...")
@@ -318,7 +328,7 @@ class LaserAblationApp(tk.Tk):
                 self.after(0, self._finalize_simulation)
         except Exception as e:
             import traceback
-            traceback.print_exc() # 這會把詳細錯誤印在終端機
+            traceback.print_exc()
             if not self.is_destroyed:
                 self.after(0, lambda: self.lbl_status.config(text=f"狀態：❌ 錯誤: {str(e)}"))
         finally:
@@ -377,7 +387,7 @@ class LaserAblationApp(tk.Tk):
         total_time = self.get_val('num_cycles') * period
         dt = 1.0 / f_laser
         t = np.arange(0, total_time, dt)
-        if len(t) > 20000: t = t[:20000] # 限制最大脈衝點以確保速度
+        if len(t) > 20000: t = t[:20000]
 
         total_passes = int(self.get_val('passes'))
         phase_shift_rad = np.radians(self.get_val('phase_shift_deg'))
@@ -438,7 +448,6 @@ class LaserAblationApp(tk.Tk):
         SIM_CACHE['F0_z'] = F0_z
         SIM_CACHE['E_p'] = E_p
 
-    # --- 透過執行緒包裝的 SCF 擬合按鈕 ---
     def on_btn_scf(self):
         self.set_ui_state("disabled")
         target_depth = self.get_val('exp_target_depth_um')
@@ -450,7 +459,7 @@ class LaserAblationApp(tk.Tk):
         tol = 0.015
         sim_flat_depth, sim_spot = 0.0, 0.0
         try:
-            for i in range(15): # 稍微降低代數以防過度搜尋
+            for i in range(15):
                 if self.is_destroyed:
                     return
 
@@ -463,7 +472,7 @@ class LaserAblationApp(tk.Tk):
                     break
 
                 ny, nx = Total_Depth.shape
-                center_region = Total_Depth[ny//4:3*ny//4, nx//4:3*ny//4]
+                center_region = Total_Depth[ny//4:3*ny//4, nx//4:3*nx//4]
                 sim_flat_depth = np.mean(center_region)
                 sim_spot = SIM_CACHE['d_eff_um']
 
