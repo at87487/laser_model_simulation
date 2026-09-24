@@ -17,27 +17,27 @@ DEFAULTS = {
     'v_stage': -1.0,        # mm/s
     'v_scan': 10.0,          # mm/s
     'f_base_khz': 1000,      # kHz
-    'divider': 10,           # 實際發射頻率 100 kHz
+    'divider': 10,            # 實際發射頻率 100 kHz
     'num_cycles': 20,
-    'passes': 2,             # 加工次數
-    'a_um': 4.0,             # μm
-    'b_um': 8.0,             # μm
+    'passes': 2,              # 加工次數
+    'a_um': 4.0,              # μm
+    'b_um': 8.0,              # μm
     'phase_shift_deg': 180.0, # Pass 間相位錯位角度 (度)
 
     'wavelength_nm': 257.5,
     'M2': 1.2,              
-    'input_D_mm': 2.0,       # 入射光徑 (mm)
+    'input_D_mm': 2.0,        # 入射光徑 (mm)
     'focal_length_mm': 10.0, # 透鏡焦距 (mm)
     'defocus_um': 0.0,
     'pulse_width_fs': 800,
 
-    'P_avg_W': 0.05,         # 平均功率 (W)
-    'F_th_1': 1.8,           # SiO2 燒蝕閾值 (J/cm²)
-    'S_inc': 0.80,           # 孵化係數
-    'delta_um': 0.025,       # 穿透深度 (μm)
-    'D_sat': 12.0,           # 飽和深度 (μm)
+    'P_avg_W': 0.05,          # 平均功率 (W)
+    'F_th_1': 1.8,            # SiO2 燒蝕閾值 (J/cm²)
+    'S_inc': 0.80,            # 孵化係數
+    'delta_um': 0.025,        # 穿透深度 (μm)
+    'D_sat': 12.0,            # 飽和深度 (μm)
 
-    'grid_res': 100,         # 預設稍微調降以兼顧流暢度
+    'grid_res': 100,          # 預設稍微調降以兼顧流暢度
     'elev': 30,
     'azim': -60,
     'slice_x_um': 0.0,
@@ -93,8 +93,8 @@ def compute_single_pass_ablation_experiment_matched(
                 r2 = (x - xc)**2 + (y - yc)**2
                 
                 if r2 <= r_cut**2:
-                    safe_w02 = max(w0**2, 1e-12)
-                    F_0 = (2.0 * E_pulse) / (np.pi * safe_w02)
+                    safe_w02 = max(w0**2, 1e-12) # μm²
+                    F_0 = (2.0 * E_pulse) / (np.pi * safe_w02 * 1e-8)
                     F = F_0 * np.exp(-2.0 * r2 / safe_w02)
                     
                     if enable_attenuation and alpha_medium > 0.0:
@@ -327,9 +327,7 @@ class LaserAblationApp(tk.Tk):
 
     def _run_simulation_task(self):
         try:
-            print("開始執行單次模擬運算...")
             self.run_simulation()
-            print("單次模擬運算完成，準備更新 UI...")
             if not self.is_destroyed:
                 self.after(0, self._finalize_simulation)
         except Exception as err:
@@ -343,10 +341,11 @@ class LaserAblationApp(tk.Tk):
                 self.after(0, lambda: self.set_ui_state("normal"))
 
     def _finalize_simulation(self):
-        x_min, x_max = SIM_CACHE['x_grid_um'][0], SIM_CACHE['x_grid_um'][-1]
-        y_min, y_max = SIM_CACHE['y_grid_um'][0], SIM_CACHE['y_grid_um'][-1]
-        self.slice_x_slider.config(from_=x_min, to=x_max)
-        self.slice_y_slider.config(from_=y_min, to=y_max)
+        if SIM_CACHE['x_grid_um'] is not None:
+            x_min, x_max = SIM_CACHE['x_grid_um'][0], SIM_CACHE['x_grid_um'][-1]
+            y_min, y_max = SIM_CACHE['y_grid_um'][0], SIM_CACHE['y_grid_um'][-1]
+            self.slice_x_slider.config(from_=x_min, to=x_max)
+            self.slice_y_slider.config(from_=y_min, to=y_max)
 
         self.render_plots()
         d0 = SIM_CACHE['d0_um']
@@ -354,7 +353,6 @@ class LaserAblationApp(tk.Tk):
         self.lbl_status.config(text=f"狀態：模擬完成！\nBeam 2w0: {d0:.2f}μm | Eff Spot: {d_eff:.2f}μm")
 
     def run_simulation(self):
-        # 強制全部轉為 float 並套用嚴格防禦性夾擠 (Clamping)
         wavelength_m = max(float(self.get_val('wavelength_nm')), 1.0) * 1e-9
         M2 = max(float(self.get_val('M2')), 1.0)
         D_m = max(float(self.get_val('input_D_mm')), 0.01) * 1e-3
@@ -393,16 +391,15 @@ class LaserAblationApp(tk.Tk):
         a_mm = a_um / 1000.0
         b_mm = b_um / 1000.0
         
-        # 絕對安全的 Ramanujan 橢圓周長計算與硬保底
         h = ((a_mm - b_mm) / max(a_mm + b_mm, 1e-12))**2
         ellipse_perimeter_mm = np.pi * (a_mm + b_mm) * (1.0 + (3.0 * h) / (10.0 + np.sqrt(max(4.0 - 3.0 * h, 1e-6))))
         ellipse_perimeter_mm = max(ellipse_perimeter_mm, 1e-3)
         
         v_scan_val = float(self.get_val('v_scan'))
         f_scan = 1e-5 if abs(v_scan_val) < 1e-5 else v_scan_val / ellipse_perimeter_mm
-        period = 1.0 / max(abs(f_scan), 1e-6)
         
         num_cycles = max(int(float(self.get_val('num_cycles'))), 1)
+        period = 1.0 / max(abs(f_scan), 1e-6)
         total_time = num_cycles * period
         dt = 1.0 / f_laser
         t = np.arange(0, total_time, dt)
@@ -479,16 +476,16 @@ class LaserAblationApp(tk.Tk):
         tol = 0.015
         sim_flat_depth, sim_spot = 0.0, 0.0
         try:
+            converged = False
+            final_gen = 0
             for i in range(15):
                 if self.is_destroyed:
                     return
 
-                print(f"SCF 擬合第 {i+1} 代進行中...")
                 self.run_simulation()
 
                 Total_Depth = SIM_CACHE['Total_Depth_um']
                 if Total_Depth is None:
-                    print("警告：Total_Depth 為空！")
                     break
 
                 ny, nx = Total_Depth.shape
@@ -497,30 +494,32 @@ class LaserAblationApp(tk.Tk):
                 sim_spot = float(SIM_CACHE['d_eff_um'])
 
                 if sim_spot <= 0 or sim_flat_depth <= 0 or np.isnan(sim_flat_depth):
-                    print("數值異常，調整參數重試...")
-                    self.set_val('M2', max(float(self.get_val('M2')) * 0.8, 1.0))
-                    self.set_val('delta_um', min(float(self.get_val('delta_um')) * 1.2, 0.10))
+                    self.params['M2'].set(max(float(self.get_val('M2')) * 0.8, 1.0))
+                    self.params['delta_um'].set(min(float(self.get_val('delta_um')) * 1.2, 0.10))
                     continue
 
                 err_depth = (sim_flat_depth - target_depth) / max(target_depth, 1e-6)
                 err_spot = (sim_spot - target_spot) / max(target_spot, 1e-6)
 
                 if abs(err_depth) < tol and abs(err_spot) < tol:
-                    print(f"SCF 於第 {i+1} 代收斂！")
-                    if not self.is_destroyed:
-                        self.after(0, self._finalize_scf_success, i+1)
-                    return
+                    converged = True
+                    final_gen = i + 1
+                    break
 
                 spot_ratio = target_spot / max(sim_spot, 1e-6)
                 new_m2 = np.clip(float(self.get_val('M2')) * spot_ratio, 1.0, 3.0)
-                self.set_val('M2', float(round(new_m2, 2)))
+                self.params['M2'].set(float(round(new_m2, 2)))
 
                 depth_ratio = target_depth / max(sim_flat_depth, 1e-6)
                 new_delta = np.clip(float(self.get_val('delta_um')) * depth_ratio, 0.005, 0.120)
-                self.set_val('delta_um', float(round(new_delta, 4)))
+                self.params['delta_um'].set(float(round(new_delta, 4)))
 
             if not self.is_destroyed:
-                self.after(0, self._finalize_scf_finish, sim_flat_depth)
+                if converged:
+                    self.after(0, lambda: self._finalize_scf_success(final_gen))
+                else:
+                    self.after(0, lambda: self._finalize_scf_finish(sim_flat_depth))
+
         except Exception as err:
             err_str = str(err)
             import traceback
@@ -556,6 +555,7 @@ class LaserAblationApp(tk.Tk):
         y_grid_um = SIM_CACHE['y_grid_um']
         all_pass_spots = SIM_CACHE['all_pass_spots']
 
+        # 嚴格確保在主執行緒中建立 3D 與 2D 子圖，避免 macOS 圖形閃退
         ax1 = self.fig.add_subplot(gs[0, 0], projection='3d')
         ax2 = self.fig.add_subplot(gs[0, 1])
         ax3 = self.fig.add_subplot(gs[0, 2])
