@@ -33,7 +33,7 @@ DEFAULTS = {
     'delta_um': 0.025,     # 穿透深度 (μm)
     'D_sat': 12.0,         # 飽和深度 (μm)
 
-    'grid_res': 160,       # 預設稍微調降以兼顧流暢度
+    'grid_res': 100,       # 預設稍微調降以兼顧流暢度
     'elev': 30,
     'azim': -60,
     'slice_x_um': 0.0,
@@ -311,10 +311,14 @@ class LaserAblationApp(tk.Tk):
 
     def _run_simulation_task(self):
         try:
+            print("開始執行單次模擬運算...")
             self.run_simulation()
+            print("單次模擬運算完成，準備更新 UI...")
             if not self.is_destroyed:
                 self.after(0, self._finalize_simulation)
         except Exception as e:
+            import traceback
+            traceback.print_exc() # 這會把詳細錯誤印在終端機
             if not self.is_destroyed:
                 self.after(0, lambda: self.lbl_status.config(text=f"狀態：❌ 錯誤: {str(e)}"))
         finally:
@@ -446,19 +450,25 @@ class LaserAblationApp(tk.Tk):
         tol = 0.015
         sim_flat_depth, sim_spot = 0.0, 0.0
         try:
-            for i in range(20): # 將最大疊代次數合理化調整至 20 代以提升收斂效率
+            for i in range(15): # 稍微降低代數以防過度搜尋
                 if self.is_destroyed:
                     return
 
+                print(f"SCF 擬合第 {i+1} 代進行中...")
                 self.run_simulation()
 
                 Total_Depth = SIM_CACHE['Total_Depth_um']
+                if Total_Depth is None:
+                    print("警告：Total_Depth 為空！")
+                    break
+
                 ny, nx = Total_Depth.shape
-                center_region = Total_Depth[ny//4:3*ny//4, nx//4:3*nx//4]
+                center_region = Total_Depth[ny//4:3*ny//4, nx//4:3*ny//4]
                 sim_flat_depth = np.mean(center_region)
                 sim_spot = SIM_CACHE['d_eff_um']
 
-                if sim_spot <= 0 or sim_flat_depth <= 0:
+                if sim_spot <= 0 or sim_flat_depth <= 0 or np.isnan(sim_flat_depth):
+                    print("數值異常，調整參數重試...")
                     self.set_val('M2', max(self.get_val('M2') * 0.8, 1.0))
                     self.set_val('delta_um', min(self.get_val('delta_um') * 1.2, 0.10))
                     continue
@@ -467,6 +477,7 @@ class LaserAblationApp(tk.Tk):
                 err_spot = (sim_spot - target_spot) / target_spot
 
                 if abs(err_depth) < tol and abs(err_spot) < tol:
+                    print(f"SCF 於第 {i+1} 代收斂！")
                     if not self.is_destroyed:
                         self.after(0, self._finalize_scf_success, i+1)
                     return
@@ -482,6 +493,8 @@ class LaserAblationApp(tk.Tk):
             if not self.is_destroyed:
                 self.after(0, self._finalize_scf_finish, sim_flat_depth)
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             if not self.is_destroyed:
                 self.after(0, lambda: self.lbl_status.config(text=f"狀態：❌ SCF 擬合錯誤: {str(e)}"))
         finally:
