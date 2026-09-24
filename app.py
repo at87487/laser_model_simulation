@@ -70,15 +70,17 @@ def compute_single_pass_ablation_experiment_matched(
     
     dx = X[1, 0] - X[0, 0]
     dy = Y[0, 1] - Y[0, 0]
-    x_min, y_min = X[0, 0], Y[0, 0]
+    if abs(dx) < 1e-9: dx = 1e-6
+    if abs(dy) < 1e-9: dy = 1e-6
     
+    x_min, y_min = X[0, 0], Y[0, 0]
     n_spots = spot_centers.shape[0]
     
     for s in range(n_spots):
         xc = spot_centers[s, 0]
         yc = spot_centers[s, 1]
         
-        r_cut = 3.0 * w0
+        r_cut = max(3.0 * w0, 1e-6)
         i_min = max(0, int(np.floor((xc - r_cut - x_min) / dx)))
         i_max = min(nx, int(np.ceil((xc + r_cut - x_min) / dx)))
         j_min = max(0, int(np.floor((yc - r_cut - y_min) / dy)))
@@ -91,8 +93,9 @@ def compute_single_pass_ablation_experiment_matched(
                 r2 = (x - xc)**2 + (y - yc)**2
                 
                 if r2 <= r_cut**2:
-                    F_0 = (2.0 * E_pulse) / (np.pi * (w0**2))
-                    F = F_0 * np.exp(-2.0 * r2 / (w0**2))
+                    safe_w02 = max(w0**2, 1e-12)
+                    F_0 = (2.0 * E_pulse) / (np.pi * safe_w02)
+                    F = F_0 * np.exp(-2.0 * r2 / safe_w02)
                     
                     if enable_attenuation and alpha_medium > 0.0:
                         d_curr = current_depth[i, j]
@@ -109,10 +112,10 @@ def compute_single_pass_ablation_experiment_matched(
                     else:
                         F_th_eff = F_th
                         
-                    if F > F_th_eff:
-                        d_k = (1.0 / alpha) * np.log(F / F_th_eff)
+                    if F > F_th_eff and alpha > 0:
+                        d_k = (1.0 / alpha) * np.log(max(F / max(F_th_eff, 1e-12), 1.0))
                         
-                        if enable_aspect:
+                        if enable_aspect and w0 > 0:
                             d_curr = current_depth[i, j]
                             aspect_ratio = d_curr / (2.0 * w0)
                             d_k = d_k * np.exp(-aspect_factor * aspect_ratio)
@@ -126,7 +129,7 @@ def compute_single_pass_ablation_experiment_matched(
 class LaserAblationApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("SiO2 飛秒雷射多 Pass 燒蝕模擬器")
+        self.title("SiO2 飛秒雷射多 Pass 燒蝕模擬器 (強固防禦版)")
         self.geometry("1450x900")
 
         self.is_destroyed = False
@@ -351,11 +354,11 @@ class LaserAblationApp(tk.Tk):
         self.lbl_status.config(text=f"狀態：模擬完成！\nBeam 2w0: {d0:.2f}μm | Eff Spot: {d_eff:.2f}μm")
 
     def run_simulation(self):
-        # 強制全部轉為 float 並加強防禦性保護
-        wavelength_m = float(self.get_val('wavelength_nm')) * 1e-9
-        M2 = max(float(self.get_val('M2')), 1e-6)
-        D_m = max(float(self.get_val('input_D_mm')) * 1e-3, 1e-6)
-        f_m = max(float(self.get_val('focal_length_mm')) * 1e-3, 1e-6)
+        # 強制全部轉為 float 並套用嚴格防禦性夾擠 (Clamping)
+        wavelength_m = max(float(self.get_val('wavelength_nm')), 1.0) * 1e-9
+        M2 = max(float(self.get_val('M2')), 1.0)
+        D_m = max(float(self.get_val('input_D_mm')), 0.01) * 1e-3
+        f_m = max(float(self.get_val('focal_length_mm')), 0.1) * 1e-3
         defocus_m = float(self.get_val('defocus_um')) * 1e-6
 
         w0_m = (2.0 * wavelength_m * f_m * M2) / max(np.pi * D_m, 1e-12)
@@ -366,13 +369,16 @@ class LaserAblationApp(tk.Tk):
         w_z_m = w0_m * np.sqrt(max(1.0 + (defocus_m / zR_m)**2, 1e-12))
         w_z_um = w_z_m * 1e6
 
-        divider_val = max(float(self.get_val('divider')), 1e-6)
-        f_laser = max((float(self.get_val('f_base_khz')) * 1000.0) / divider_val, 1e-6)
-        E_p = float(self.get_val('P_avg_W')) / f_laser
-        w_z_cm = w_z_m * 100.0
+        divider_val = max(float(self.get_val('divider')), 1.0)
+        f_base_khz = max(float(self.get_val('f_base_khz')), 1.0)
+        f_laser = max((f_base_khz * 1000.0) / divider_val, 1.0)
+        
+        P_avg_W = max(float(self.get_val('P_avg_W')), 1e-5)
+        E_p = P_avg_W / f_laser
+        w_z_cm = max(w_z_m * 100.0, 1e-6)
         F0_z = (2.0 * E_p) / max(np.pi * (w_z_cm**2), 1e-12)
 
-        F_th_1 = float(self.get_val('F_th_1'))
+        F_th_1 = max(float(self.get_val('F_th_1')), 0.01)
         if F0_z > F_th_1:
             d_eff_um = 2.0 * w_z_um * np.sqrt(max(0.5 * np.log(F0_z / F_th_1), 0.0))
         else:
@@ -382,12 +388,12 @@ class LaserAblationApp(tk.Tk):
         pitch_stage_um = v_stage_um_s / f_laser
         overlap_rate = (1.0 - (pitch_stage_um / max(d0_um, 1e-6))) * 100.0
 
-        a_um = float(self.get_val('a_um'))
-        b_um = float(self.get_val('b_um'))
-        a_mm = max(a_um / 1000.0, 1e-6)
-        b_mm = max(b_um / 1000.0, 1e-6)
+        a_um = max(float(self.get_val('a_um')), 0.1)
+        b_um = max(float(self.get_val('b_um')), 0.1)
+        a_mm = a_um / 1000.0
+        b_mm = b_um / 1000.0
         
-        # 嚴格的 Ramanujan 橢圓周長計算與強制絕對安全保底
+        # 絕對安全的 Ramanujan 橢圓周長計算與硬保底
         h = ((a_mm - b_mm) / max(a_mm + b_mm, 1e-12))**2
         ellipse_perimeter_mm = np.pi * (a_mm + b_mm) * (1.0 + (3.0 * h) / (10.0 + np.sqrt(max(4.0 - 3.0 * h, 1e-6))))
         ellipse_perimeter_mm = max(ellipse_perimeter_mm, 1e-3)
@@ -395,21 +401,24 @@ class LaserAblationApp(tk.Tk):
         v_scan_val = float(self.get_val('v_scan'))
         f_scan = 1e-5 if abs(v_scan_val) < 1e-5 else v_scan_val / ellipse_perimeter_mm
         period = 1.0 / max(abs(f_scan), 1e-6)
-        total_time = float(self.get_val('num_cycles')) * period
+        
+        num_cycles = max(int(float(self.get_val('num_cycles'))), 1)
+        total_time = num_cycles * period
         dt = 1.0 / f_laser
         t = np.arange(0, total_time, dt)
         if len(t) > 20000: t = t[:20000]
 
-        total_passes = int(float(self.get_val('passes')))
+        total_passes = max(int(float(self.get_val('passes'))), 1)
         phase_shift_rad = np.radians(float(self.get_val('phase_shift_deg')))
 
         all_pass_spots = []
         all_x_spots = []
         all_y_spots = []
 
+        v_stage_val = float(self.get_val('v_stage'))
         for p in range(total_passes):
             current_phase = p * phase_shift_rad
-            x_p = np.ascontiguousarray(a_um * np.cos(2 * np.pi * f_scan * t + current_phase) + (float(self.get_val('v_stage')) * 1000.0) * t)
+            x_p = np.ascontiguousarray(a_um * np.cos(2 * np.pi * f_scan * t + current_phase) + (v_stage_val * 1000.0) * t)
             y_p = np.ascontiguousarray(b_um * np.sin(2 * np.pi * f_scan * t + current_phase))
 
             all_pass_spots.append((x_p, y_p))
@@ -420,7 +429,7 @@ class LaserAblationApp(tk.Tk):
         x_min, x_max = np.min(all_x_spots) - margin_um, np.max(all_x_spots) + margin_um
         y_min, y_max = np.min(all_y_spots) - margin_um, np.max(all_y_spots) + margin_um
 
-        res = int(float(self.get_val('grid_res')))
+        res = max(int(float(self.get_val('grid_res'))), 50)
         x_grid_um = np.ascontiguousarray(np.linspace(x_min, x_max, res))
         y_grid_um = np.ascontiguousarray(np.linspace(y_min, y_max, res))
         X, Y = np.meshgrid(x_grid_um, y_grid_um)
