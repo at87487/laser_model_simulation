@@ -382,12 +382,13 @@ class LaserAblationApp(tk.Tk):
         overlap_rate = (1.0 - (pitch_stage_um / max(d0_um, 1e-6))) * 100.0
 
         a_um, b_um = self.get_val('a_um'), self.get_val('b_um')
-        a_mm, b_mm = a_um / 1000.0, b_um / 1000.0
-        h = ((a_mm - b_mm)**2) / ((a_mm + b_mm)**2 + 1e-12)
+        a_mm = max(a_um / 1000.0, 1e-6)
+        b_mm = max(b_um / 1000.0, 1e-6)
         
-        # 加上防禦性保護，確保分母絕對不會是 0
-        ellipse_perimeter_mm = np.pi * (a_mm + b_mm) * (1 + (3 * h) / (10 + np.sqrt(max(4 - 3 * h, 1e-6))))
-        ellipse_perimeter_mm = max(ellipse_perimeter_mm, 1e-6)
+        # 使用強健的 Ramanujan 橢圓周長近似公式，並強制絕對安全保底
+        h = ((a_mm - b_mm) / (a_mm + b_mm))**2
+        ellipse_perimeter_mm = np.pi * (a_mm + b_mm) * (1.0 + (3.0 * h) / (10.0 + np.sqrt(max(4.0 - 3.0 * h, 1e-6))))
+        ellipse_perimeter_mm = max(ellipse_perimeter_mm, 1e-3)
         
         v_scan_val = self.get_val('v_scan')
         f_scan = 1e-5 if abs(v_scan_val) < 1e-5 else v_scan_val / ellipse_perimeter_mm
@@ -480,7 +481,7 @@ class LaserAblationApp(tk.Tk):
                     break
 
                 ny, nx = Total_Depth.shape
-                center_region = Total_Depth[ny//4:3*ny//4, nx//4:3*nx//4]
+                center_region = Total_Depth[ny//4:3*ny//4, nx//4:3*ny//4]
                 sim_flat_depth = np.mean(center_region)
                 sim_spot = SIM_CACHE['d_eff_um']
 
