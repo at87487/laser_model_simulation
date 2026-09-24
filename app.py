@@ -15,29 +15,29 @@ from numba import njit, prange
 # --- 1. 預設參數 ---
 DEFAULTS = {
     'v_stage': -1.0,        # mm/s
-    'v_scan': 10.0,         # mm/s
-    'f_base_khz': 1000,     # kHz
-    'divider': 10,          # 實際發射頻率 100 kHz
+    'v_scan': 10.0,          # mm/s
+    'f_base_khz': 1000,      # kHz
+    'divider': 10,           # 實際發射頻率 100 kHz
     'num_cycles': 20,
-    'passes': 2,            # 加工次數
-    'a_um': 4.0,            # μm
-    'b_um': 8.0,            # μm
+    'passes': 2,             # 加工次數
+    'a_um': 4.0,             # μm
+    'b_um': 8.0,             # μm
     'phase_shift_deg': 180.0, # Pass 間相位錯位角度 (度)
 
     'wavelength_nm': 257.5,
     'M2': 1.2,              
-    'input_D_mm': 2.0,      # 入射光徑 (mm)
+    'input_D_mm': 2.0,       # 入射光徑 (mm)
     'focal_length_mm': 10.0, # 透鏡焦距 (mm)
     'defocus_um': 0.0,
     'pulse_width_fs': 800,
 
-    'P_avg_W': 0.05,        # 平均功率 (W)
-    'F_th_1': 1.8,          # SiO2 燒蝕閾值 (J/cm²)
-    'S_inc': 0.80,          # 孵化係數
-    'delta_um': 0.025,      # 穿透深度 (μm)
-    'D_sat': 12.0,          # 飽和深度 (μm)
+    'P_avg_W': 0.05,         # 平均功率 (W)
+    'F_th_1': 1.8,           # SiO2 燒蝕閾值 (J/cm²)
+    'S_inc': 0.80,           # 孵化係數
+    'delta_um': 0.025,       # 穿透深度 (μm)
+    'D_sat': 12.0,           # 飽和深度 (μm)
 
-    'grid_res': 100,        # 預設稍微調降以兼顧流暢度
+    'grid_res': 100,         # 預設稍微調降以兼顧流暢度
     'elev': 30,
     'azim': -60,
     'slice_x_um': 0.0,
@@ -126,7 +126,7 @@ def compute_single_pass_ablation_experiment_matched(
 class LaserAblationApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("SiO2 飛秒雷射多 Pass 燒蝕模擬器 (多執行緒流暢版)")
+        self.title("SiO2 飛秒雷射多 Pass 燒蝕模擬器")
         self.geometry("1450x900")
 
         self.is_destroyed = False
@@ -155,7 +155,6 @@ class LaserAblationApp(tk.Tk):
         
         self.scrollable_frame = ttk.Frame(self.canvas_scroll)
 
-        # 安全防護：使用字串相加避免編輯器過濾尖括號
         CONFIG_EVENT = "<" + "Configure" + ">"
 
         self.scrollable_frame.bind(
@@ -173,7 +172,7 @@ class LaserAblationApp(tk.Tk):
         self.bind_mousewheel_recursive(self.scrollable_frame)
 
         # 1. 運動控制
-        lf_motion = ttk.LabelFrame(self.scrollable_frame, text="🌀 運動控制與掃描軌跡", padding="5")
+        lf_motion = ttk.LabelFrame(self.scrollable_frame, text="運動控制與掃描軌跡", padding="5")
         lf_motion.pack(fill=tk.X, pady=5, padx=5)
         self.add_slider(lf_motion, 'v_stage', 'v_stage (mm/s)', -10.0, 10.0, 0.5)
         self.add_slider(lf_motion, 'v_scan', 'v_scan (mm/s)', -100.0, 100.0, 1.0)
@@ -186,7 +185,7 @@ class LaserAblationApp(tk.Tk):
         self.add_slider(lf_motion, 'phase_shift_deg', 'Pass 相位差 (°)', 0.0, 360.0, 15.0)
 
         # 2. 光學系統
-        lf_optics = ttk.LabelFrame(self.scrollable_frame, text="🔍 光學與焦區系統", padding="5")
+        lf_optics = ttk.LabelFrame(self.scrollable_frame, text="光學與焦區系統", padding="5")
         lf_optics.pack(fill=tk.X, pady=5, padx=5)
         self.add_slider(lf_optics, 'wavelength_nm', '波長 λ (nm)', 257.5, 1070.0, 0.5)
         self.add_slider(lf_optics, 'M2', '光束質量 M²', 1.0, 3.0, 0.05)
@@ -196,7 +195,7 @@ class LaserAblationApp(tk.Tk):
         self.add_slider(lf_optics, 'pulse_width_fs', '脈寬 τ (fs)', 50, 5000, 50, is_int=True)
 
         # 3. 雷射功率與材料參數
-        lf_physics = ttk.LabelFrame(self.scrollable_frame, text="⚡ 雷射功率與 SiO2 物理參數", padding="5")
+        lf_physics = ttk.LabelFrame(self.scrollable_frame, text="雷射功率與 SiO2 物理參數", padding="5")
         lf_physics.pack(fill=tk.X, pady=5, padx=5)
         self.add_slider(lf_physics, 'P_avg_W', 'Power (W)', 0.01, 10.0, 0.01)
         self.add_slider(lf_physics, 'F_th_1', 'F_th_1 (J/cm²)', 0.5, 5.0, 0.1)
@@ -205,16 +204,16 @@ class LaserAblationApp(tk.Tk):
         self.add_slider(lf_physics, 'D_sat', 'D_sat (μm)', 1.0, 50.0, 0.5)
 
         # 4. SCF 擬合控制
-        lf_scf = ttk.LabelFrame(self.scrollable_frame, text="🎯 物理約束 SCF 實驗雙參數擬合", padding="5")
+        lf_scf = ttk.LabelFrame(self.scrollable_frame, text="物理約束 SCF 實驗雙參數擬合", padding="5")
         lf_scf.pack(fill=tk.X, pady=5, padx=5)
         self.add_slider(lf_scf, 'exp_target_depth_um', '實驗底部深度 (μm)', 1.0, 100.0, 0.5)
         self.add_slider(lf_scf, 'exp_target_spot_um', '實際加工光斑 (μm)', 0.2, 10.0, 0.1)
         
-        self.btn_scf = ttk.Button(lf_scf, text="🔄 執行物理約束 SCF 擬合", command=self.on_btn_scf)
+        self.btn_scf = ttk.Button(lf_scf, text="執行物理約束 SCF 擬合", command=self.on_btn_scf)
         self.btn_scf.pack(fill=tk.X, pady=5)
 
         # 5. 視角與切面控制
-        lf_view = ttk.LabelFrame(self.scrollable_frame, text="🔪 視角與剖面切面控制", padding="5")
+        lf_view = ttk.LabelFrame(self.scrollable_frame, text="視角與剖面切面控制", padding="5")
         lf_view.pack(fill=tk.X, pady=5, padx=5)
         self.add_slider(lf_view, 'grid_res', '網格解析度', 100, 300, 20, is_int=True, auto_render=True)
         self.add_slider(lf_view, 'elev', '3D 俯角', 0, 90, 5, is_int=True, auto_render=True)
@@ -226,7 +225,7 @@ class LaserAblationApp(tk.Tk):
         chk_spots = ttk.Checkbutton(lf_view, text="顯示軌跡與脈衝點", variable=self.chk_show_spots, command=self.render_plots)
         chk_spots.pack(anchor=tk.W, pady=2)
 
-        self.btn_run = ttk.Button(self.scrollable_frame, text="🚀 開始模擬", command=self.on_btn_run)
+        self.btn_run = ttk.Button(self.scrollable_frame, text="開始模擬", command=self.on_btn_run)
         self.btn_run.pack(fill=tk.X, pady=15, padx=5)
 
         self.lbl_status = ttk.Label(self.scrollable_frame, text="狀態：等待啟動...", wraplength=380, foreground="blue")
@@ -308,7 +307,7 @@ class LaserAblationApp(tk.Tk):
     def show_blank_canvas(self):
         self.fig.clear()
         ax = self.fig.add_subplot(111)
-        ax.text(0.5, 0.5, "歡迎使用 SiO2 飛秒雷射模擬器！\n\n請點擊左側「🚀 開始模擬」或\n「🔄 執行物理約束 SCF 擬合」按鈕開始計算", 
+        ax.text(0.5, 0.5, "歡迎使用 SiO2 飛秒雷射模擬器！\n\n請點擊左側「開始模擬」或\n「執行物理約束 SCF 擬合」按鈕開始計算", 
                 ha='center', va='center', fontsize=14, color='gray', multialignment='center')
         ax.axis('off')
         self.canvas.draw()
@@ -320,7 +319,7 @@ class LaserAblationApp(tk.Tk):
 
     def on_btn_run(self):
         self.set_ui_state("disabled")
-        self.lbl_status.config(text="狀態：⚡ 背景運算中：正在計算物理修正版 SiO2 多 Pass 燒蝕...")
+        self.lbl_status.config(text="狀態：背景運算中：正在計算物理修正版 SiO2 多 Pass 燒蝕...")
         threading.Thread(target=self._run_simulation_task, daemon=True).start()
 
     def _run_simulation_task(self):
@@ -330,11 +329,12 @@ class LaserAblationApp(tk.Tk):
             print("單次模擬運算完成，準備更新 UI...")
             if not self.is_destroyed:
                 self.after(0, self._finalize_simulation)
-        except Exception as e:
+        except Exception as err:
+            err_str = str(err)
             import traceback
             traceback.print_exc()
             if not self.is_destroyed:
-                self.after(0, lambda: self.lbl_status.config(text=f"狀態：❌ 錯誤: {str(e)}"))
+                self.after(0, lambda msg=err_str: self.lbl_status.config(text=f"狀態：錯誤: {msg}"))
         finally:
             if not self.is_destroyed:
                 self.after(0, lambda: self.set_ui_state("normal"))
@@ -348,27 +348,28 @@ class LaserAblationApp(tk.Tk):
         self.render_plots()
         d0 = SIM_CACHE['d0_um']
         d_eff = SIM_CACHE['d_eff_um']
-        self.lbl_status.config(text=f"狀態：✅ 模擬完成！\nBeam 2w0: {d0:.2f}μm | Eff Spot: {d_eff:.2f}μm")
+        self.lbl_status.config(text=f"狀態：模擬完成！\nBeam 2w0: {d0:.2f}μm | Eff Spot: {d_eff:.2f}μm")
 
     def run_simulation(self):
         wavelength_m = self.get_val('wavelength_nm') * 1e-9
-        M2 = self.get_val('M2')
-        D_m = self.get_val('input_D_mm') * 1e-3
-        f_m = self.get_val('focal_length_mm') * 1e-3
+        M2 = max(self.get_val('M2'), 1e-6)
+        D_m = max(self.get_val('input_D_mm') * 1e-3, 1e-6)
+        f_m = max(self.get_val('focal_length_mm') * 1e-3, 1e-6)
         defocus_m = self.get_val('defocus_um') * 1e-6
 
         w0_m = (2.0 * wavelength_m * f_m * M2) / (np.pi * D_m)
         w0_um = w0_m * 1e6
         d0_um = 2.0 * w0_um
 
-        zR_m = (np.pi * w0_m**2) / (wavelength_m * M2)
+        zR_m = max((np.pi * w0_m**2) / max(wavelength_m * M2, 1e-12), 1e-12)
         w_z_m = w0_m * np.sqrt(1.0 + (defocus_m / zR_m)**2)
         w_z_um = w_z_m * 1e6
 
-        f_laser = (self.get_val('f_base_khz') * 1000.0) / float(self.get_val('divider'))
-        E_p = self.get_val('P_avg_W') / f_laser
+        divider_val = max(float(self.get_val('divider')), 1e-6)
+        f_laser = (self.get_val('f_base_khz') * 1000.0) / divider_val
+        E_p = self.get_val('P_avg_W') / max(f_laser, 1e-6)
         w_z_cm = w_z_m * 100.0
-        F0_z = (2.0 * E_p) / (np.pi * (w_z_cm**2))
+        F0_z = (2.0 * E_p) / max(np.pi * (w_z_cm**2), 1e-12)
 
         F_th_1 = self.get_val('F_th_1')
         if F0_z > F_th_1:
@@ -377,22 +378,22 @@ class LaserAblationApp(tk.Tk):
             d_eff_um = 0.0
 
         v_stage_um_s = abs(self.get_val('v_stage')) * 1000.0
-        pitch_stage_um = v_stage_um_s / f_laser
-        overlap_rate = (1.0 - (pitch_stage_um / d0_um)) * 100.0
+        pitch_stage_um = v_stage_um_s / max(f_laser, 1e-6)
+        overlap_rate = (1.0 - (pitch_stage_um / max(d0_um, 1e-6))) * 100.0
 
         a_um, b_um = self.get_val('a_um'), self.get_val('b_um')
         a_mm, b_mm = a_um / 1000.0, b_um / 1000.0
         h = ((a_mm - b_mm)**2) / ((a_mm + b_mm)**2 + 1e-12)
         
         # 加上防禦性保護，確保分母絕對不會是 0
-        ellipse_perimeter_mm = np.pi * (a_mm + b_mm) * (1 + (3 * h) / (10 + np.sqrt(4 - 3 * h)))
+        ellipse_perimeter_mm = np.pi * (a_mm + b_mm) * (1 + (3 * h) / (10 + np.sqrt(max(4 - 3 * h, 1e-6))))
         ellipse_perimeter_mm = max(ellipse_perimeter_mm, 1e-6)
         
         v_scan_val = self.get_val('v_scan')
         f_scan = 1e-5 if abs(v_scan_val) < 1e-5 else v_scan_val / ellipse_perimeter_mm
-        period = 1.0 / abs(f_scan)
+        period = 1.0 / max(abs(f_scan), 1e-6)
         total_time = self.get_val('num_cycles') * period
-        dt = 1.0 / f_laser
+        dt = 1.0 / max(f_laser, 1e-6)
         t = np.arange(0, total_time, dt)
         if len(t) > 20000: t = t[:20000]
 
@@ -425,7 +426,7 @@ class LaserAblationApp(tk.Tk):
         pass_history = []
 
         S_inc = self.get_val('S_inc')
-        delta_um = self.get_val('delta_um')
+        delta_um = max(self.get_val('delta_um'), 1e-6)
 
         for p in range(total_passes):
             x_p, y_p = all_pass_spots[p]
@@ -459,7 +460,7 @@ class LaserAblationApp(tk.Tk):
         self.set_ui_state("disabled")
         target_depth = self.get_val('exp_target_depth_um')
         target_spot = self.get_val('exp_target_spot_um')
-        self.lbl_status.config(text=f"狀態：🔄 背景執行中：物理約束 SCF 擬合 (目標深度={target_depth}μm)...")
+        self.lbl_status.config(text=f"狀態：背景執行中：物理約束 SCF 擬合 (目標深度={target_depth}μm)...")
         threading.Thread(target=self._run_scf_task, daemon=True).start()
 
     def _run_scf_task(self):
@@ -498,34 +499,35 @@ class LaserAblationApp(tk.Tk):
                         self.after(0, self._finalize_scf_success, i+1)
                     return
 
-                spot_ratio = target_spot / sim_spot
+                spot_ratio = target_spot / max(sim_spot, 1e-6)
                 new_m2 = np.clip(self.get_val('M2') * spot_ratio, 1.0, 3.0)
                 self.set_val('M2', float(round(new_m2, 2)))
 
-                depth_ratio = target_depth / sim_flat_depth
+                depth_ratio = target_depth / max(sim_flat_depth, 1e-6)
                 new_delta = np.clip(self.get_val('delta_um') * depth_ratio, 0.005, 0.120)
                 self.set_val('delta_um', float(round(new_delta, 4)))
 
             if not self.is_destroyed:
                 self.after(0, self._finalize_scf_finish, sim_flat_depth)
-        except Exception as e:
+        except Exception as err:
+            err_str = str(err)
             import traceback
             traceback.print_exc()
             if not self.is_destroyed:
-                self.after(0, lambda: self.lbl_status.config(text=f"狀態：❌ SCF 擬合錯誤: {str(e)}"))
+                self.after(0, lambda msg=err_str: self.lbl_status.config(text=f"狀態：SCF 擬合錯誤: {msg}"))
         finally:
             if not self.is_destroyed:
                 self.after(0, lambda: self.set_ui_state("normal"))
 
     def _finalize_scf_success(self, generations):
         self.render_plots()
-        msg = (f"狀態：✅ SCF 於第 {generations} 代成功收斂！\n"
+        msg = (f"狀態：SCF 於第 {generations} 代成功收斂！\n"
                f"擬合結果: M² = {self.get_val('M2'):.2f}, delta = {self.get_val('delta_um'):.4f} μm")
         self.lbl_status.config(text=msg)
 
     def _finalize_scf_finish(self, sim_flat_depth):
         self.render_plots()
-        msg = f"狀態：⚠️ SCF 完成疊代，當前平坦深度: {sim_flat_depth:.2f} μm, 有效光斑: {SIM_CACHE['d_eff_um']:.2f} μm"
+        msg = f"狀態：SCF 完成疊代，當前平坦深度: {sim_flat_depth:.2f} μm, 有效光斑: {SIM_CACHE['d_eff_um']:.2f} μm"
         self.lbl_status.config(text=msg)
 
     def render_plots(self):
